@@ -1,15 +1,53 @@
 import picar_4wd as picar
-from picar_4wd.servo import Servo
+#import servo
 from picar_4wd.ultrasonic import Ultrasonic
 from picar_4wd.pwm import PWM
 from picar_4wd.pin import Pin
 #import utils, constants
 import time, math
+from picar_4wd.utils import mapping
 
+#Camera imports
+import cv2
+from object_detector import ObjectDetector
+from object_detector import ObjectDetectorOptions
+
+class Servo():
+    PERIOD = 4095
+    PRESCALER = 10
+    MAX_PW = 2500
+    MIN_PW = 500
+    FREQ = 50
+    ARR = 4095
+    CPU_CLOCK = 72000000
+    def __init__(self, pin, offset=0):
+        self.pin = pin
+        self.offset = offset
+        self.pin.period(self.PERIOD)
+        prescaler = int(float(self.CPU_CLOCK) / self.FREQ/ self.ARR)
+        self.pin.prescaler(prescaler)
+        self.currentAngle = 0
+
+    def set_angle(self, angle):
+        try:
+            angle = int(angle)
+            self.currentAngle = angle
+        except:
+            raise ValueError("Angle value should be int value, not %s"%angle)
+        if angle < -90:
+            angle = -90
+        if angle > 90:
+            angle = 90
+        angle = angle + self.offset
+        High_level_time = mapping(angle, -90, 90, self.MIN_PW, self.MAX_PW)
+        pwr =  High_level_time / 20000
+        value = int(pwr*self.PERIOD)
+        self.pin.pulse_width(value)
+        
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
-WHEEL_POWER = 100
-ROTATION_SPEED = 30
+FORWARD_SPEED = 40
+TURN_SPEED = 30
 THIRTY_FIVE_CM = 20
 TEN_CM = 10
 SERVO_SLEEP = 0.08
@@ -20,20 +58,6 @@ SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
 SERVO_TIME = 0.5
 
-def isDetected(distances: list):
-    for distance in distances:
-        if 'found' in distance:
-            return True
-    return False
-
-def detectionSubset(distances: list):
-    MAX_RANGE = 19
-    detection_list = []
-    for distance in distances:
-        if 'current-angle' in distance and abs(distance['current-angle']) < MAX_RANGE:
-            detection_list.append(distance)
-    return detection_list
-
 def calculate_cycles_from_distance(distance: int):
     # five centimeters
     base_distance = {'distance': 5, 'cycles': 2}
@@ -41,163 +65,113 @@ def calculate_cycles_from_distance(distance: int):
     print('cycleCount\n', cycleCount)
     return cycleCount * base_distance["cycles"]
 
-
-def move(cycles, movement_type='linear', direction='forward'):
-    movement = {
-        'linear': {
-            'forward': picar.forward,
-            'backward': picar.backward
-        },
-        'rotation': {
-            'left': picar.turn_left,
-            'right': picar.turn_right
-        }
-    }
-
-    movement_power = WHEEL_POWER if movement_type == 'linear' else ROTATION_SPEED
-    movement[movement_type][direction](movement_power)
-
-    for i in range(cycles):
-        time.sleep(0.1)
-    picar.stop()
-    return True
-
-
-# def move_until_sensor_detects_at(cm: int):
-#     while(picar.us.get_distance() <= cm):
-#         picar.forward(constants.WHEEL_POWER)
-#     picar.stop()
-
 def get_status_at(angle, servo_speed=SERVO_TIME):
     servo.set_angle(angle)
     time.sleep(servo_speed)
     return ultrasonic.get_distance()
 
-
-angle_distance = [0, 0]
-current_angle = 0
-current_servo_position = SERVO_STEP
-max_angle = 90
-min_angle = -90
-
-
-def perform_stationary_scan(detection_distance=30, servo_speed=SERVO_TIME):
-    global SERVO_STEP
-    distances = []
-    detection_list = []
-    servo.set_angle(SERVO_ZERO_ANGLE)
-    time.sleep(servo_speed)
-    servo.set_angle(SERVO_MAX_ANGLE)
-    current_angle = SERVO_MAX_ANGLE
-    time.sleep(servo_speed)
-    while len(distances) <= 10 and current_angle >= SERVO_MIN_ANGLE:
-        distance = get_status_at(current_angle, servo_speed=servo_speed)
-        isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        distances.append({'distance': distance, 'current-angle': current_angle, 'detection': isDetected})
-        detection_list.append(isDetected)
-        current_angle -= SERVO_STEP
-    servo.set_angle(SERVO_ZERO_ANGLE)
-
-    return (distances, detection_list)
-
-def perform_moving_scan(detection_distance=30, servo_speed=SERVO_TIME):
+def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
     global SERVO_STEP
     servo_delta = SERVO_STEP
     detection_list = []
-    servo.set_angle(SERVO_ZERO_ANGLE)
-    current_angle = SERVO_ZERO_ANGLE
-    time.sleep(servo_speed)
+    scan_info = []
+    start_angle = servo.currentAngle
+    current_angle = servo.currentAngle
+    
+    if(start_angle >= SERVO_MAX_ANGLE):
+        servo_delta = -servo_delta
+    elif(start_angle <= SERVO_MIN_ANGLE):
+        servo_delta = abs(servo_delta)
+    else:
+        servo_delta = 0
 
-    while sum(detection_list) <= 0:
+    while ((start_angle == SERVO_MIN_ANGLE and current_angle <= SERVO_MAX_ANGLE) or
+          (start_angle == SERVO_MAX_ANGLE and current_angle >= SERVO_MIN_ANGLE)):
+        
         distance = get_status_at(current_angle, servo_speed=servo_speed)
+        #print('current angle', current_angle)
         isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        detection_list.append(isDetected)
+        scan_info.append({'distance': distance, 'current-angle': current_angle, 'detection': isDetected})
+        detection_list.append(isDetected)       
         current_angle += servo_delta
+ 
+    print('One Sweep detection list:', detection_list) 
+    return (scan_info, detection_list)
 
-        if(current_angle > SERVO_MAX_ANGLE):
-            servo_delta = -servo_delta
-            print('servo max angle')
-        if(current_angle < SERVO_MIN_ANGLE):
-            print('servo min angle', servo_delta)
-            servo_delta = abs(servo_delta)
+def decide_movement(sweep_info, Isdetected):
+    isClearAhead = not sum(Isdetected[3:7])
+    isClearLeft = not sum(Isdetected[0:2])
+    isClearRight = not sum(Isdetected[8:10])
 
-        print('current angle', current_angle)
-
-    print('detection list', detection_list)
-    servo.set_angle(SERVO_ZERO_ANGLE)
-
-    return True
-# def self_drive():
-#     servo.set_angle(0)
-#     picar.forward(constants.WHEEL_POWER)
-#     isObjectFound = False
-#     while not isObjectFound:
-#         print('running wheels! lol')
-#         scan_info = scan_step()
-#         if(scan_info):
-#             scan_subset = utils.detectionSubset(scan_info)
-
-#         if(scan_info):
-#             print('scaninfo %s:', scan_info)
-#             print('subset %s', scan_subset)
-#             wasItemDetected = utils.isDetected(scan_subset)
-#             if(wasItemDetected and wasItemDetected):
-#                 print('is detected halting')
-#                 isObjectFound = True
-#                 picar.stop()
-#     picar.stop()
-#     servo.set_angle(0)
-
-def decide_movement(scan_results: list):
-    detection = scan_results[1]
-    forward_domain = detection[3:7]
-    left_domain = detection[0:2]
-    right_domain = detection[8:10]
-
-    print(scan_results[1])
-    isSomethingAhead = sum(forward_domain) >= 1
-    isSomethingLeft = sum(left_domain) >= 1
-    isSomethingRight = sum(right_domain) >= 1
-    if(isSomethingAhead and isSomethingLeft):
-        move(5, movement_type='rotation', direction='right')
-    if(isSomethingAhead and isSomethingRight):
-        move(5, movement_type='rotation', direction='left')
-
-    detection_distances = []
-    safe_forward_cycles = 0
-    print('scan result', scan_results[0][3:8])
-    for scan_result in scan_results[0][3:7]:
-        if(not scan_result['distance'] == -2):
-            detection_distances.append(scan_result['distance'])
-            
-    if(not isSomethingAhead):
-        max_safe_distance = min(detection_distances) -THIRTY_FIVE_CM
-        print('detection dist', detection_distances)
-        safe_forward_cycles = calculate_cycles_from_distance(max_safe_distance)
-        print('safe forward cyucles', safe_forward_cycles)
-        if(max_safe_distance > 0 and max_safe_distance <= 80):
-            print('moving forward')
-            #move(safe_forward_cycles, movement_type='linear', direction='forward')
+    if(isClearAhead):
+        picar.forward(FORWARD_SPEED)
+    else:
+        if(isClearLeft):
+            picar.turn_left(TURN_SPEED)
+        elif(isClearRight):
+            picar.turn_right(TURN_SPEED)
+        else:
+            picar.stop()
+ 
+#     detection_distances = []
+#     safe_forward_cycles = 0
+#     print('scan result', sweep_info[3:8])
+#     print('Isdetected', Isdetected[3:8])
+#     for scan_result in sweep_info[3:7]:
+#         if(not scan_result['distance'] == -2):
+#             detection_distances.append(scan_result['distance'])
+#             
+#     if(not isSomethingAhead):
+#         max_safe_distance = min(detection_distances) -THIRTY_FIVE_CM
+#         print('detection dist', detection_distances)
+#         safe_forward_cycles = calculate_cycles_from_distance(max_safe_distance)
+#         print('safe forward cyucles', safe_forward_cycles)
+#         if(max_safe_distance > 0 and max_safe_distance <= 80):
+#             print('moving forward')
+#             #move(safe_forward_cycles, movement_type='linear', direction='forward')
         
 
 if __name__ == '__main__':
-    # self_drive()
-    #servo.set_angle(0)
-    # #move(5, movement_type='rotation', direction='left')
-    # distance = ultrasonic.get_distance()
-    # if(distance > 35):
-    #     picar.forward
-    # picar.stop()
-    # print()
-    isSafeToMove = True
-    while isSafeToMove:
-        picar.forward(WHEEL_POWER)
-        isSafeToMove = not perform_moving_scan(servo_speed=0.02)
-        if(not isSafeToMove):
-            picar.stop()
-            stationary_scan = perform_stationary_scan()
-            decide_movement(stationary_scan)
-    picar.stop()
+    try:
+        servo.set_angle(SERVO_MIN_ANGLE)
+        
+         #Camera setting Camera Id = 0
+         camera = cv2.VideoCapture(0)
+         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+         
+         #Tensorflow model settings
+         tensorflow_model_options = ObjectDetectorOptions(
+             num_threads=4,
+             score_threshold=0.5,
+             max_results=3,
+             enable_edgetpu=False)
+         
+         detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
+
+        #While ESC key is not pressed
+        while (cv2.waitKey(1) != 27):           
+            #get ultrasonic sweep data
+            (one_sweep_info, IsDetected) = perform_one_sweep(servo_speed=0.02)
+            
+            #get detected camera objects
+             if(camera.isOpened()):
+                 success, image = camera.read()
+                 if(success):
+                     image = cv2.flip(image, 1)
+                     detections_info = detector.detect(image)
+                     print(detections_info)
+                 else:
+                     print('Camera read error')                    
+             else:
+                 print('Camera open error')
+                
+            decide_movement(one_sweep_info, IsDetected)
+
+    finally:
+         camera.release()
+        picar.stop()
+        servo.set_angle(SERVO_ZERO_ANGLE)
 
 ##todo: fix the detection on move to be less sensitive on the sides
 ## if there is something blocking it's forward path should check on the sides then decide
