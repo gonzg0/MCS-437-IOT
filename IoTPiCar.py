@@ -6,9 +6,10 @@ from picar_4wd.pin import Pin
 #import utils, constants
 import time, math
 from picar_4wd.utils import mapping
+import numpy as np
 
 #Camera imports
-import cv2
+import cv2 as cv
 from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
 
@@ -91,7 +92,7 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         distance = get_status_at(current_angle, servo_speed=servo_speed)
         #print('current angle', current_angle)
         isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        scan_info.append({'distance': distance, 'current-angle': current_angle, 'detection': isDetected})
+        scan_info.append({'distance': distance, 'angle': current_angle, 'detection': isDetected})
         detection_list.append(isDetected)       
         current_angle += servo_delta
  
@@ -129,47 +130,62 @@ def decide_movement(sweep_info, Isdetected):
 #         if(max_safe_distance > 0 and max_safe_distance <= 80):
 #             print('moving forward')
 #             #move(safe_forward_cycles, movement_type='linear', direction='forward')
-        
+
+def create_advanced_mapping(sweep_info):
+    AngleToIndexMap = {'-90':0, '-72':1, '-54':2 ,'-36': 3, '-18':4, '0':5, '18':6, '36':7, '54':8, '72':9, '90':10}
+    envoriment_map = np.zeros((30,11))
+    for entry in sweep_info:
+        if(entry['detection']):
+            distanceToIndex = math.floor(entry['distance']) -1
+            if(distanceToIndex < 0):
+                distanceToIndex = 0
+            envoriment_map[distanceToIndex, AngleToIndexMap[str(entry['angle'])]] = entry['detection']
+    #print(envoriment_map)
+    return envoriment_map
 
 if __name__ == '__main__':
     try:
         servo.set_angle(SERVO_MIN_ANGLE)
         
-         #Camera setting Camera Id = 0
-         camera = cv2.VideoCapture(0)
-         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        #Camera setting Camera Id = 0
+        camera = cv.VideoCapture(0)
+        camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+        camera.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
          
-         #Tensorflow model settings
-         tensorflow_model_options = ObjectDetectorOptions(
-             num_threads=4,
-             score_threshold=0.5,
-             max_results=3,
-             enable_edgetpu=False)
+        #Tensorflow model settings
+        tensorflow_model_options = ObjectDetectorOptions(
+            num_threads=4,
+            score_threshold=0.5,
+            max_results=3,
+            enable_edgetpu=False)
          
-         detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
+        detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
 
         #While ESC key is not pressed
-        while (cv2.waitKey(1) != 27):           
+        while (cv.waitKey(1) != 27):           
             #get ultrasonic sweep data
             (one_sweep_info, IsDetected) = perform_one_sweep(servo_speed=0.02)
-            
+            envoriment_map = create_advanced_mapping(one_sweep_info)
             #get detected camera objects
-             if(camera.isOpened()):
-                 success, image = camera.read()
-                 if(success):
-                     image = cv2.flip(image, 1)
-                     detections_info = detector.detect(image)
-                     print(detections_info)
-                 else:
-                     print('Camera read error')                    
-             else:
-                 print('Camera open error')
+            if(camera.isOpened()):
+                success, image = camera.read()
+                if(success):
+                    image = cv.flip(image, 1)
+                    detections_info = detector.detect(image)
+#                    for detected_obect in detections_info:
+#                        label = detected_obect.categories[0].label
+#                        score = detected_obect.categories[0].score
+#                        result.append([label, score])
+#                        print(result)
+                else:
+                    print('Camera read error')                    
+            else:
+                print('Camera open error')
                 
             decide_movement(one_sweep_info, IsDetected)
 
     finally:
-         camera.release()
+        camera.release()
         picar.stop()
         servo.set_angle(SERVO_ZERO_ANGLE)
 
