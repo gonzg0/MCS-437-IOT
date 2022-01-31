@@ -1,5 +1,5 @@
 import picar_4wd as picar
-#import servo
+import servo
 from picar_4wd.ultrasonic import Ultrasonic
 from picar_4wd.pwm import PWM
 from picar_4wd.pin import Pin
@@ -12,38 +12,6 @@ import numpy as np
 import cv2 as cv
 from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
-
-class Servo():
-    PERIOD = 4095
-    PRESCALER = 10
-    MAX_PW = 2500
-    MIN_PW = 500
-    FREQ = 50
-    ARR = 4095
-    CPU_CLOCK = 72000000
-    def __init__(self, pin, offset=0):
-        self.pin = pin
-        self.offset = offset
-        self.pin.period(self.PERIOD)
-        prescaler = int(float(self.CPU_CLOCK) / self.FREQ/ self.ARR)
-        self.pin.prescaler(prescaler)
-        self.currentAngle = 0
-
-    def set_angle(self, angle):
-        try:
-            angle = int(angle)
-            self.currentAngle = angle
-        except:
-            raise ValueError("Angle value should be int value, not %s"%angle)
-        if angle < -90:
-            angle = -90
-        if angle > 90:
-            angle = 90
-        angle = angle + self.offset
-        High_level_time = mapping(angle, -90, 90, self.MIN_PW, self.MAX_PW)
-        pwr =  High_level_time / 20000
-        value = int(pwr*self.PERIOD)
-        self.pin.pulse_width(value)
         
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
@@ -58,7 +26,13 @@ SERVO_MAX_ANGLE = 90
 SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
 SERVO_TIME = 0.5
+servo_currentAngle = SERVO_ZERO_ANGLE
 
+def set_servo_angle(angle: int):
+    global servo_currentAngle
+    servo_currentAngle = angle
+    servo.set_angle(angle)
+    
 def calculate_cycles_from_distance(distance: int):
     # five centimeters
     base_distance = {'distance': 5, 'cycles': 2}
