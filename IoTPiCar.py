@@ -32,7 +32,10 @@ def set_servo_angle(angle: int):
     global servo_currentAngle
     servo_currentAngle = angle
     servo.set_angle(angle)
-    
+
+def get_servo_angle():
+    return(servo_currentAngle)
+
 def calculate_cycles_from_distance(distance: int):
     # five centimeters
     base_distance = {'distance': 5, 'cycles': 2}
@@ -41,22 +44,21 @@ def calculate_cycles_from_distance(distance: int):
     return cycleCount * base_distance["cycles"]
 
 def get_status_at(angle, servo_speed=SERVO_TIME):
-    servo.set_angle(angle)
+    set_servo_angle(angle)
     time.sleep(servo_speed)
     return ultrasonic.get_distance()
 
 def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
     global SERVO_STEP
-    servo_delta = SERVO_STEP
     detection_list = []
     scan_info = []
-    start_angle = servo.currentAngle
-    current_angle = servo.currentAngle
+    start_angle = get_servo_angle()
+    next_angle = get_servo_angle()
     
     if(start_angle >= SERVO_MAX_ANGLE):
-        servo_delta = -servo_delta
+        servo_delta = -SERVO_STEP
     elif(start_angle <= SERVO_MIN_ANGLE):
-        servo_delta = abs(servo_delta)
+        servo_delta = SERVO_STEP
     else:
         servo_delta = 0
 
@@ -68,7 +70,7 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
         scan_info.append({'distance': distance, 'angle': current_angle, 'detection': isDetected})
         detection_list.append(isDetected)       
-        current_angle += servo_delta
+        next_angle = get_servo_angle() + servo_delta
  
     print('One Sweep detection list:', detection_list) 
     return (scan_info, detection_list)
@@ -120,7 +122,7 @@ def create_advanced_mapping(sweep_info):
 
 if __name__ == '__main__':
     try:
-        servo.set_angle(SERVO_MIN_ANGLE)
+        set_servo_angle(SERVO_MIN_ANGLE)
         
         #Camera setting Camera Id = 0
         camera = cv.VideoCapture(0)
@@ -163,7 +165,7 @@ if __name__ == '__main__':
     finally:
         camera.release()
         picar.stop()
-        servo.set_angle(SERVO_ZERO_ANGLE)
+        set_servo_angle(SERVO_ZERO_ANGLE)
 
 ##todo: fix the detection on move to be less sensitive on the sides
 ## if there is something blocking it's forward path should check on the sides then decide
