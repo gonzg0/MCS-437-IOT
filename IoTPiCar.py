@@ -107,6 +107,7 @@ def decide_movement(sweep_info, Isdetected):
     if(isClearAhead):
         picar.forward(FORWARD_SPEED)
     else:
+        picar.stop()
         if(isClearLeft):
             picar.turn_left(TURN_SPEED)
         elif(isClearRight):
@@ -172,11 +173,12 @@ if __name__ == '__main__':
                 if(success):
                     image = cv.flip(image, 1)
                     detections_info = detector.detect(image)
-#                    for detected_obect in detections_info:
-#                        label = detected_obect.categories[0].label
-#                        score = detected_obect.categories[0].score
-#                        result.append([label, score])
-#                        print(result)
+#                     result = []
+#                     for detected_obect in detections_info:
+#                         label = detected_obect.categories[0].label
+#                         score = detected_obect.categories[0].score
+#                         result.append([label, score])
+#                     print('Object list:',result)
                 else:
                     print('Camera read error')                    
             else:
