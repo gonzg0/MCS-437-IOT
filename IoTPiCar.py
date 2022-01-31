@@ -34,6 +34,7 @@ def set_servo_angle(angle: int):
     servo.set_angle(angle)
 
 def get_servo_angle():
+    global servo_currentAngle
     return(servo_currentAngle)
 
 def calculate_cycles_from_distance(distance: int):
@@ -62,13 +63,13 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
     else:
         servo_delta = 0
 
-    while ((start_angle == SERVO_MIN_ANGLE and current_angle <= SERVO_MAX_ANGLE) or
-          (start_angle == SERVO_MAX_ANGLE and current_angle >= SERVO_MIN_ANGLE)):
+    while ((start_angle == SERVO_MIN_ANGLE and next_angle <= SERVO_MAX_ANGLE) or
+          (start_angle == SERVO_MAX_ANGLE and next_angle >= SERVO_MIN_ANGLE)):
         
-        distance = get_status_at(current_angle, servo_speed=servo_speed)
-        #print('current angle', current_angle)
+        distance = get_status_at(next_angle, servo_speed=servo_speed)
+        #print('current angle', next_angle)
         isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        scan_info.append({'distance': distance, 'angle': current_angle, 'detection': isDetected})
+        scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})
         detection_list.append(isDetected)       
         next_angle = get_servo_angle() + servo_delta
  
