@@ -1,5 +1,5 @@
 import picar_4wd as picar
-import servo
+from picar_4wd.servo import Servo
 from picar_4wd.ultrasonic import Ultrasonic
 from picar_4wd.pwm import PWM
 from picar_4wd.pin import Pin
@@ -12,7 +12,7 @@ import numpy as np
 import cv2 as cv
 from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
-        
+      
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
 FORWARD_SPEED = 40
@@ -28,6 +28,16 @@ SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
 SERVO_TIME = 0.5
 servo_currentAngle = SERVO_ZERO_ANGLE
+MAP_SIZE = 200
+envoriment_map = np.zeros((MAP_SIZE,MAP_SIZE), dtype='uint8')
+
+#Considering the car starts from the bottom center
+car_start_map_x = MAP_SIZE/2 -1
+car_start_map_y = 0
+
+#Considering the car desitnation to be last mid point of the map
+car_destination_map_x = MAP_SIZE/2 -1
+car_destination_map_y = MAP_SIZE -1
 
 def set_servo_angle(angle: int):
     global servo_currentAngle
@@ -74,7 +84,7 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         detection_list.append(isDetected)       
         next_angle = get_servo_angle() + servo_delta
  
-    print('One Sweep detection list:', detection_list) 
+    #print('One Sweep detection list:', detection_list) 
     return (scan_info, detection_list)
 
 def decide_movement(sweep_info, Isdetected):
@@ -111,17 +121,22 @@ def decide_movement(sweep_info, Isdetected):
 #             #move(safe_forward_cycles, movement_type='linear', direction='forward')
 
 def create_advanced_mapping(sweep_info):
-    AngleToIndexMap = {'-90':0, '-72':1, '-54':2 ,'-36': 3, '-18':4, '0':5, '18':6, '36':7, '54':8, '72':9, '90':10}
-    envoriment_map = np.zeros((30,11))
+    global envoriment_map
     for entry in sweep_info:
         if(entry['detection']):
-            distanceToIndex = math.floor(entry['distance']) -1
-            if(distanceToIndex < 0):
-                distanceToIndex = 0
-            envoriment_map[distanceToIndex, AngleToIndexMap[str(entry['angle'])]] = entry['detection']
-    #print(envoriment_map)
-    return envoriment_map
-
+            #(x,y) with respect to the car
+            scanned_object_x = entry['distance']*math.sin(math.radians(entry['angle']))
+            scanned_object_y = entry['distance']*math.cos(math.radians(entry['angle']))
+                        
+            #(x,y) with respect to the ma           
+            map_x = car_start_map_x + scanned_object_x
+            map_y = car_start_map_y + scanned_object_y
+            
+            if((map_x >= MAP_SIZE) or (map_y >= MAP_SIZE)):
+                print('x:',scanned_object_x, 'y:',scanned_object_y,'xx:',map_x,'yy:',map_y)
+            else:
+                envoriment_map[int(map_x), int(map_y)] = entry['detection']
+        
 if __name__ == '__main__':
     try:
         set_servo_angle(SERVO_MIN_ANGLE)
@@ -144,7 +159,7 @@ if __name__ == '__main__':
         while (cv.waitKey(1) != 27):           
             #get ultrasonic sweep data
             (one_sweep_info, IsDetected) = perform_one_sweep(servo_speed=0.02)
-            envoriment_map = create_advanced_mapping(one_sweep_info)
+            create_advanced_mapping(one_sweep_info)
             #get detected camera objects
             if(camera.isOpened()):
                 success, image = camera.read()
@@ -163,6 +178,7 @@ if __name__ == '__main__':
                 print('Camera open error')
                 
             decide_movement(one_sweep_info, IsDetected)
+        print(envoriment_map)
 
     finally:
         camera.release()
