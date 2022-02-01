@@ -178,7 +178,7 @@ if __name__ == '__main__':
                 print('Camera open error')
                 
             decide_movement(one_sweep_info, IsDetected)
-        print(envoriment_map)
+        #print(envoriment_map)
 
     finally:
         camera.release()
