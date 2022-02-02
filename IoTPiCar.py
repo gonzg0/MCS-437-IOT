@@ -15,8 +15,8 @@ from object_detector import ObjectDetectorOptions
       
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
-FORWARD_SPEED = 40
-BACKWARD_SPEED = 40
+FORWARD_SPEED = 10
+BACKWARD_SPEED = 10
 TURN_SPEED = 30
 THIRTY_FIVE_CM = 20
 TEN_CM = 10
