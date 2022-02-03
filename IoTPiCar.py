@@ -12,23 +12,26 @@ import numpy as np
 import cv2 as cv
 from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
-      
+
+import Animation as animate
+ENABLE_PLOT=False
+MAP_SIZE = 200
+
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
-FORWARD_SPEED = 10
+FORWARD_SPEED = 5
 BACKWARD_SPEED = 10
 TURN_SPEED = 30
 THIRTY_FIVE_CM = 20
 TEN_CM = 10
 SERVO_SLEEP = 0.08
-SERVO_STEP = 18
+SERVO_STEP = 10
 DETECTION_DISTANCE = 30
 SERVO_MAX_ANGLE = 90
 SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
 SERVO_TIME = 0.5
 servo_currentAngle = SERVO_ZERO_ANGLE
-MAP_SIZE = 200
 envoriment_map = np.zeros((MAP_SIZE,MAP_SIZE), dtype='uint8')
 
 #Considering the car starts from the bottom center
@@ -39,6 +42,10 @@ car_start_map_y = 0
 car_destination_map_x = MAP_SIZE/2 -1
 car_destination_map_y = MAP_SIZE -1
 
+def VisualizeData(x, y,cl):
+    if ENABLE_PLOT:
+        animate.animate_scan(x, y, cl=cl)
+        
 def set_servo_angle(angle: int):
     global servo_currentAngle
     servo_currentAngle = angle
@@ -125,8 +132,9 @@ def create_advanced_mapping(sweep_info):
     for entry in sweep_info:
         if(entry['detection']):
             #(x,y) with respect to the car
-            scanned_object_x = entry['distance']*math.sin(math.radians(entry['angle']))
-            scanned_object_y = entry['distance']*math.cos(math.radians(entry['angle']))
+            thetaInRadians = math.radians(entry['angle'])
+            scanned_object_x = entry['distance']*math.sin(thetaInRadians)
+            scanned_object_y = entry['distance']*math.cos(thetaInRadians)
                         
             #(x,y) with respect to the ma           
             map_x = car_start_map_x + scanned_object_x
@@ -135,7 +143,8 @@ def create_advanced_mapping(sweep_info):
             if((map_x >= MAP_SIZE) or (map_y >= MAP_SIZE)):
                 print('x:',scanned_object_x, 'y:',scanned_object_y,'xx:',map_x,'yy:',map_y)
             else:
-                envoriment_map[int(map_x), int(map_y)] = entry['detection']
+                envoriment_map[int(map_x), int(map_y)] = 1
+                VisualizeData(int(map_x), int(map_y), cl='black')
         
 if __name__ == '__main__':
     try:
@@ -154,7 +163,13 @@ if __name__ == '__main__':
             enable_edgetpu=False)
          
         detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
-
+        
+        #mark the start on the plot
+        VisualizeData(car_start_map_x, car_start_map_y, cl='red')
+        
+        #mark the end on the plot
+        VisualizeData(car_destination_map_x, car_destination_map_y, cl='green')
+        
         #While ESC key is not pressed
         while (cv.waitKey(1) != 27):           
             #get ultrasonic sweep data
@@ -184,6 +199,3 @@ if __name__ == '__main__':
         camera.release()
         picar.stop()
         set_servo_angle(SERVO_ZERO_ANGLE)
-
-##todo: fix the detection on move to be less sensitive on the sides
-## if there is something blocking it's forward path should check on the sides then decide
