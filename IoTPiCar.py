@@ -14,7 +14,7 @@ from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
 
 import Animation as animate
-ENABLE_PLOT=True
+ENABLE_PLOT=False
 MAP_SIZE = 200
 
 servo = Servo(PWM("P0"), offset=0)
