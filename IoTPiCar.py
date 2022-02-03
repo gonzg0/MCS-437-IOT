@@ -14,7 +14,7 @@ from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
 
 import Animation as animate
-ENABLE_PLOT=False
+ENABLE_PLOT=True
 MAP_SIZE = 200
 
 servo = Servo(PWM("P0"), offset=0)
@@ -25,8 +25,8 @@ TURN_SPEED = 30
 THIRTY_FIVE_CM = 20
 TEN_CM = 10
 SERVO_SLEEP = 0.08
-SERVO_STEP = 10
-DETECTION_DISTANCE = 30
+SERVO_STEP = 18
+DETECTION_DISTANCE = 40
 SERVO_MAX_ANGLE = 90
 SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
@@ -173,7 +173,7 @@ if __name__ == '__main__':
         #While ESC key is not pressed
         while (cv.waitKey(1) != 27):           
             #get ultrasonic sweep data
-            (one_sweep_info, IsDetected) = perform_one_sweep(servo_speed=0.02)
+            (one_sweep_info, IsDetected) = perform_one_sweep(DETECTION_DISTANCE, servo_speed=0.02)
             create_advanced_mapping(one_sweep_info)
             #get detected camera objects
             if(camera.isOpened()):
