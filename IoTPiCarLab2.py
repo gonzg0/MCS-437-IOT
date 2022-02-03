@@ -165,16 +165,16 @@ if __name__ == '__main__':
         detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
         
         #mark the start on the plot
-        #VisualizeData(car_start_map_x, car_start_map_y, cl='red')
+        VisualizeData(car_start_map_x, car_start_map_y, cl='red')
         
         #mark the end on the plot
-        #VisualizeData(car_destination_map_x, car_destination_map_y, cl='green')
+        VisualizeData(car_destination_map_x, car_destination_map_y, cl='green')
         
         #While ESC key is not pressed
         while (cv.waitKey(1) != 27):           
             #get ultrasonic sweep data
             (one_sweep_info, IsDetected) = perform_one_sweep(DETECTION_DISTANCE, servo_speed=0.02)
-            #create_advanced_mapping(one_sweep_info)
+            create_advanced_mapping(one_sweep_info)
             #get detected camera objects
             if(camera.isOpened()):
                 success, image = camera.read()
