@@ -3,6 +3,8 @@ from picar_4wd.servo import Servo
 from picar_4wd.ultrasonic import Ultrasonic
 from picar_4wd.pwm import PWM
 from picar_4wd.pin import Pin
+import RPi.GPIO as GPIO
+
 #import utils, constants
 import time, math
 from picar_4wd.utils import mapping
@@ -19,7 +21,6 @@ MAP_SIZE = 200
 
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
-
 FORWARD_SPEED = 5
 BACKWARD_SPEED = 10
 TURN_SPEED = 30
@@ -48,6 +49,42 @@ car_start_map_y = 0
 car_destination_map_x = MAP_SIZE/2 -1
 car_destination_map_y = MAP_SIZE -1
 
+class Photointrrupter():
+    wheelDiameter = 2.5
+    PPR = 20
+    def __init__(self, pin):
+        self.pin = pin
+        self.distancePerPulse = (2*3.14*self.wheelDiameter/2)/self.PPR
+        self.distance = 0
+        self.pulseCount = 0
+        self.turn = 0
+        
+    def setup(self):
+        self.pin.irq(self.RisingEdgeHandler, GPIO.RISING)
+    
+    def RisingEdgeHandler(self, channel):
+        #if it is a turn skip the distance calcuation
+        if(not self.turn):
+            self.pulseCount +=1
+            self.distance = self.pulseCount * self.distancePerPulse
+        #print(self.distance)
+
+def picar_forward(speed):
+    photointrrupter.turn = 0
+    picar.forward(speed)
+
+def picar_reverse(speed):
+    photointrrupter.turn = 0
+    picar.backward(speed)
+
+def picar_turn_left(speed):
+    photointrrupter.turn = 1
+    picar.turn_left(speed)
+
+def picar_turn_right(speed):
+    photointrrupter.turn = 1
+    picar.turn_right(speed)
+        
 def VisualizeData(x, y,cl):
     if ENABLE_PLOT:
         animate.animate_scan(x, y, cl=cl)
@@ -106,32 +143,15 @@ def decide_movement(sweep_info, Isdetected):
     isClearRight = not sum(Isdetected[8:10])
 
     if(isClearAhead):
-        picar.forward(FORWARD_SPEED)
+        picar_forward(FORWARD_SPEED)
     else:
         picar.stop()
         if(isClearLeft):
-            picar.turn_left(TURN_SPEED)
+            picar_turn_left(TURN_SPEED)
         elif(isClearRight):
-            picar.turn_right(TURN_SPEED)
+            picar_turn_right(TURN_SPEED)
         else:
-            picar.backward(BACKWARD_SPEED)
- 
-#     detection_distances = []
-#     safe_forward_cycles = 0
-#     print('scan result', sweep_info[3:8])
-#     print('Isdetected', Isdetected[3:8])
-#     for scan_result in sweep_info[3:7]:
-#         if(not scan_result['distance'] == -2):
-#             detection_distances.append(scan_result['distance'])
-#             
-#     if(not isSomethingAhead):
-#         max_safe_distance = min(detection_distances) -THIRTY_FIVE_CM
-#         print('detection dist', detection_distances)
-#         safe_forward_cycles = calculate_cycles_from_distance(max_safe_distance)
-#         print('safe forward cyucles', safe_forward_cycles)
-#         if(max_safe_distance > 0 and max_safe_distance <= 80):
-#             print('moving forward')
-#             #move(safe_forward_cycles, movement_type='linear', direction='forward')
+            picar_reverse(BACKWARD_SPEED)
 
 def create_advanced_mapping(sweep_info, cam_result):
     global envoriment_map
@@ -172,6 +192,9 @@ if __name__ == '__main__':
             enable_edgetpu=False)
          
         detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
+        
+        photointrrupter = Photointrrupter(Pin('D6'))
+        photointrrupter.setup()
         
         #mark the start on the plot
         VisualizeData(car_start_map_x, car_start_map_y, cl='red')
