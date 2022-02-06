@@ -197,6 +197,79 @@ def create_advanced_mapping(sweep_info, cam_result):
 
 #   added by me below
 
+def find_quadrant(car_x, car_y, end_x, end_y):
+    dx = end_x - car_x
+    dy = end_y - car_y
+    x_ , y_ = -1 , -1
+    if dx >= 0: x_ = 1
+    if dy >= 0: y_ = 1
+
+    if x_ == 1 and y_ == 1:
+        return 1
+    elif x_ == -1 and y_ == 1:
+        return 2
+    elif x_ == -1 and y_ == -1:
+        return 3
+    return 4
+
+def get_intersect(a1, a2, b1, b2, quadrant):
+    """ 
+    Returns the point of intersection of the lines passing through a2,a1 and b2,b1.
+    a1: [x, y] a point on the first line
+    a2: [x, y] another point on the first line
+    b1: [x, y] a point on the second line
+    b2: [x, y] another point on the second line
+    """
+    s = np.vstack([a1,a2,b1,b2])        # s for stacked
+    h = np.hstack((s, np.ones((4, 1)))) # h for homogeneous
+    l1 = np.cross(h[0], h[1])           # get first line
+    l2 = np.cross(h[2], h[3])           # get second line
+    x, y, z = np.cross(l1, l2)          # point of intersection
+    if z == 0:                          # lines are parallel
+        return (float('inf'), float('inf'))
+    if quadrant == 1:
+        return (x//z - 1, y//z - 1)
+    return (x//z + 1, y//z - 1)
+
+def intersection_points(quadrant, car_x, car_y, end_x, end_y, map_size):
+
+    if quadrant == 3 or quadrant == 4 :
+        raise Exception('turn around??')
+
+    a1 = [car_x, car_y]
+    a2 = [end_x, end_y]
+    if quadrant == 1:
+        b1 = [car_x+map_size, car_y]
+        b2 = [car_x+map_size, car_y+map_size]
+        x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
+        if x_intr == float('inf') or x_intr > car_x+map_size or y_intr > car_y+map_size:
+            b1 = [car_x, car_y+map_size]
+            x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
+            if x_intr == float('inf'):
+                raise Exception('something is wrong in quadrant?')
+            return x_intr, y_intr
+    elif quadrant == 2:
+        b1 = [car_x-map_size, car_y]
+        b2 = [car_x-map_size, car_y+map_size]
+        x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
+        if x_intr == float('inf') or x_intr < car_x-map_size or y_intr > car_y+map_size:
+            b1 = [car_x, car_y+map_size]
+            x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
+            if x_intr == float('inf'):
+                raise Exception('something is wrong in quadrant?')
+            return x_intr, y_intr
+        
+
+def find_pseduo_end(car_x, car_y, end_x, end_y, map_size):
+
+    quadrant = find_quadrant(car_x, car_y, end_x, end_y)
+    x_intr, y_intr = intersection_points(quadrant, car_x, car_y, end_x, end_y, map_size)
+    #print(x_intr, y_intr)
+    return x_intr, y_intr
+
+        
+# maybe add the stuff below to new file later and import instead?
+
 class Node:
     """
         A node class for A* Pathfinding
