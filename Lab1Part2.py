@@ -16,11 +16,13 @@ from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
 
 import Animation as animate
-ENABLE_PLOT=False
-MAP_SIZE = 200
+import threading
 
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
+ENABLE_PLOT=False
+MAP_SIZE = 200
+SPEED = 5
 FORWARD_SPEED = 5
 BACKWARD_SPEED = 10
 TURN_SPEED = 30
@@ -32,14 +34,12 @@ DETECTION_DISTANCE = 40
 SERVO_MAX_ANGLE = 90
 SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
-SERVO_TIME = 0.5
+SERVO_TIME = 0.02
+TURN_LEFT_TIME_FOR_90_DEGREE = 1.75
+TURN_RIGHT_TIME_FOR_90_DEGREE = 1.6
 servo_currentAngle = SERVO_ZERO_ANGLE
 envoriment_map_ultrasonic = np.zeros((MAP_SIZE,MAP_SIZE), dtype=np.uint8)
 envoriment_map_camera = np.empty((MAP_SIZE,MAP_SIZE), dtype="S10")
-CAMERA_OBJECT_NO_OBJECT = 0
-CAMERA_OBJECT_STOP_SIGN = 1
-CAMERA_OBJECT_PERSON = 2
-CAMERA_OBJECT_UNIDENTIFIED = 3
 
 #Considering the car starts from the bottom center
 car_start_map_x = MAP_SIZE/2 -1
@@ -50,7 +50,7 @@ car_destination_map_x = MAP_SIZE/2 -1
 car_destination_map_y = MAP_SIZE -1
 
 class Photointrrupter():
-    wheelDiameter = 2.5
+    wheelDiameter = 6.6
     PPR = 20
     def __init__(self, pin):
         self.pin = pin
@@ -68,7 +68,11 @@ class Photointrrupter():
             self.pulseCount +=1
             self.distance = self.pulseCount * self.distancePerPulse
         #print(self.distance)
-
+    def getDistance(self):
+        return(self.distance)
+    def resetDistance(self):
+        self.pulseCount = 0
+        
 def picar_forward(speed):
     photointrrupter.turn = 0
     picar.forward(speed)
@@ -79,12 +83,16 @@ def picar_reverse(speed):
 
 def picar_turn_left(speed):
     photointrrupter.turn = 1
-    picar.turn_left(speed)
-
+    picar.turn_right(speed)
+    
 def picar_turn_right(speed):
     photointrrupter.turn = 1
-    picar.turn_right(speed)
-        
+    picar.turn_left(speed)    
+
+def picar_stop():
+    photointrrupter.turn = 0
+    picar.stop()
+    
 def VisualizeData(x, y,cl):
     if ENABLE_PLOT:
         animate.animate_scan(x, y, cl=cl)
@@ -134,7 +142,7 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         detection_list.append(isDetected)       
         next_angle = get_servo_angle() + servo_delta
  
-    #print('One Sweep detection list:', detection_list) 
+    print('One Sweep detection list:', detection_list) 
     return (scan_info, detection_list)
 
 def decide_movement(sweep_info, Isdetected):
@@ -145,7 +153,6 @@ def decide_movement(sweep_info, Isdetected):
     if(isClearAhead):
         picar_forward(FORWARD_SPEED)
     else:
-        picar.stop()
         if(isClearLeft):
             picar_turn_left(TURN_SPEED)
         elif(isClearRight):
@@ -174,15 +181,15 @@ def create_advanced_mapping(sweep_info, cam_result):
             else:    
                 envoriment_map_camera[int(map_x), int(map_y)] = cam_result
                 VisualizeData(int(map_x), int(map_y), cl='black')
-        
-if __name__ == '__main__':
-    try:
-        set_servo_angle(SERVO_MIN_ANGLE)
-        
+                
+class ObjectDetection():
+    CAMERA_THREAD_SLEEP_TIME = 0.02
+    def __init__(self):
+        self.cam_result = ""
         #Camera setting Camera Id = 0
-        camera = cv.VideoCapture(0)
-        camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-        camera.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+        self.camera = cv.VideoCapture(0)
+        self.camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+        self.camera.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
          
         #Tensorflow model settings
         tensorflow_model_options = ObjectDetectorOptions(
@@ -191,10 +198,74 @@ if __name__ == '__main__':
             max_results=3,
             enable_edgetpu=False)
          
-        detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
+        self.detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)        
+    def __del__(self):
+        self.camera.release()
         
+    def camera_scan(self):
+        global cam_result
+        while(True):
+            #get detected camera objects
+            if(self.camera.isOpened()):
+                success, image = self.camera.read()
+                if(success):
+                    image = cv.flip(image, 1)
+                    detections_info = self.detector.detect(image)
+                    cam_result = ""
+                    for detected_obect in detections_info:
+                        if(detected_obect.categories[0].label == 'person'):
+                            cam_result = detected_obect.categories[0].label
+                            break
+                        elif(detected_obect.categories[0].label == 'stop sign'):
+                            cam_result = detected_obect.categories[0].label
+                    self.cam_result = cam_result
+                    print('camera_scan:Object list:',self.cam_result)
+                else:
+                    print('Camera read error1')                    
+            else:
+                print('Camera open error2')
+            time.sleep(self.CAMERA_THREAD_SLEEP_TIME)
+
+    def setup(self):
+        self.cameraThread = threading.Thread(target=self.camera_scan, daemon=True)
+        self.cameraThread.start()
+        
+    def getDetectedObject(self):
+        return(self.cam_result)
+    
+def car_command(command, step=0):
+    photointrrupter.resetDistance()
+    while((command != 'Stop')):
+        print('car_command:',command,':',photointrrupter.getDistance(),':',step,':',photointrrupter.getDistance() <= step,':',(command == 'forawrd'),':', type(command))
+        if(command == 'Forward'):
+            while(photointrrupter.getDistance() <= step):
+                picar_forward(SPEED)
+            command = 'Stop'
+        elif(command == 'Reverse'):
+            while(photointrrupter.getDistance() <= step):
+                picar_reverse(SPEED)
+            command = 'Stop'    
+        elif(command == 'Left'):
+            turnStartTime = time.time()
+            while((time.time() - turnStartTime) <= TURN_LEFT_TIME_FOR_90_DEGREE):
+                picar_turn_left(SPEED)
+            command = 'Stop'
+        elif(command == 'Right'):
+            turnStartTime = time.time()
+            while((time.time() - turnStartTime) <= TURN_RIGHT_TIME_FOR_90_DEGREE):
+                picar_turn_right(SPEED)
+            command = 'Stop'
+        else:
+            command = 'Stop'
+    picar_stop()
+        
+if __name__ == '__main__':
+    try:
+        set_servo_angle(SERVO_MIN_ANGLE)
+        
+
         photointrrupter = Photointrrupter(Pin('D6'))
-        photointrrupter.setup()
+        detector=ObjectDetection()
         
         #mark the start on the plot
         VisualizeData(car_start_map_x, car_start_map_y, cl='red')
@@ -202,33 +273,16 @@ if __name__ == '__main__':
         #mark the end on the plot
         VisualizeData(car_destination_map_x, car_destination_map_y, cl='green')
         
-        #While ESC key is not pressed
-        while (cv.waitKey(1) != 27):           
-            #get ultrasonic sweep data
-            (one_sweep_info, IsDetected) = perform_one_sweep(DETECTION_DISTANCE, servo_speed=0.02)
-            #get detected camera objects
-            if(camera.isOpened()):
-                success, image = camera.read()
-                if(success):
-                    image = cv.flip(image, 1)
-                    detections_info = detector.detect(image)
-                    cam_result = ""
-                    for detected_obect in detections_info:
-                        if((detected_obect.categories[0].label == 'person') or
-                           (detected_obect.categories[0].label == 'stop sign')):
-                            cam_result=detected_obect.categories[0].label
-                            break
-                    print('Object list:',cam_result)
-                else:
-                    print('Camera read error')                    
-            else:
-                print('Camera open error')
-            create_advanced_mapping(one_sweep_info, cam_result)
-            
-            decide_movement(one_sweep_info, IsDetected)
-        #print(envoriment_map)
+        photointrrupter.setup()
+        detector.setup()
+        car_command('Forward', 80)
+        
+        while(True):
+              scan_info, detection_list = perform_one_sweep(40, 0.03)
+              create_advanced_mapping(scan_info, detector.getDetectedObject())
+#              print('Main:Object:', detector.getDetectedObject())
 
     finally:
-        camera.release()
-        picar.stop()
+        #print('Finally')
+        picar_stop()
         set_servo_angle(SERVO_ZERO_ANGLE)
