@@ -10,11 +10,11 @@ import termios
 
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
-FORWARD_SPEED = 5
+FORWARD_SPEED = 10
 BACKWARD_SPEED = 10
-TURN_SPEED = 30
+TURN_SPEED = 40
 SERVO_STEP = 18
-ULTRASONIC_DETECTION_DISTANCE = 40
+ULTRASONIC_DETECTION_DISTANCE = 35
 SERVO_MAX_ANGLE = 90
 SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
@@ -53,16 +53,15 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
           (start_angle == SERVO_MAX_ANGLE and next_angle >= SERVO_MIN_ANGLE)):
         
         distance = get_status_at(next_angle, servo_speed=servo_speed)
-        #print('current angle', next_angle)
         isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})
         detection_list.append(isDetected)       
         next_angle = get_servo_angle() + servo_delta
  
-    #print('One Sweep detection list:', detection_list) 
-    return (scan_info, detection_list)
+    if(servo_delta < 0):
+        detection_list.reverse()
+    return (detection_list)
    
-def decide_movement(sweep_info, Isdetected):
+def decide_movement(Isdetected):
     isClearAhead = not sum(Isdetected[3:7])
     isClearLeft = not sum(Isdetected[0:2])
     isClearRight = not sum(Isdetected[8:10])
@@ -70,11 +69,10 @@ def decide_movement(sweep_info, Isdetected):
     if(isClearAhead):
         picar.forward(FORWARD_SPEED)
     else:
-        picar.stop()
-        if(isClearLeft):
-            picar.turn_left(TURN_SPEED)
-        elif(isClearRight):
+        if(isClearRight):
             picar.turn_right(TURN_SPEED)
+        elif(isClearLeft):
+            picar.turn_left(TURN_SPEED)
         else:
             picar.backward(BACKWARD_SPEED)
        
@@ -85,8 +83,8 @@ if __name__ == '__main__':
         #While ESC key is not pressed
         while (True):
             #get ultrasonic sweep data
-            (one_sweep_info, IsDetected) = perform_one_sweep(ULTRASONIC_DETECTION_DISTANCE, servo_speed=0.02)               
-            decide_movement(one_sweep_info, IsDetected)
+            IsDetected = perform_one_sweep(ULTRASONIC_DETECTION_DISTANCE, servo_speed=0.02)               
+            decide_movement(IsDetected)
 
     finally:
         picar.stop()
