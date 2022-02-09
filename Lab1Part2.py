@@ -142,6 +142,9 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         detection_list.append(isDetected)       
         next_angle = get_servo_angle() + servo_delta
  
+    if(servo_delta < 0):
+       detection_list.reverse()
+       scan_info.reverse()
     print('One Sweep detection list:', detection_list) 
     return (scan_info, detection_list)
 
@@ -261,8 +264,7 @@ def car_command(command, step=0):
         
 if __name__ == '__main__':
     try:
-        set_servo_angle(SERVO_MIN_ANGLE)
-        
+        set_servo_angle(SERVO_MIN_ANGLE)        
 
         photointrrupter = Photointrrupter(Pin('D6'))
         detector=ObjectDetection()
