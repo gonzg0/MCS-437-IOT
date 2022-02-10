@@ -35,7 +35,7 @@ SERVO_MAX_ANGLE = 90
 SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
 SERVO_TIME = 0.02
-TURN_LEFT_TIME_FOR_90_DEGREE = 1.75
+TURN_LEFT_TIME_FOR_90_DEGREE = 1.6
 TURN_RIGHT_TIME_FOR_90_DEGREE = 1.6
 servo_currentAngle = SERVO_ZERO_ANGLE
 envoriment_map_ultrasonic = np.zeros((MAP_SIZE,MAP_SIZE), dtype=np.uint8)
@@ -120,7 +120,6 @@ def get_status_at(angle, servo_speed=SERVO_TIME):
 
 def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
     global SERVO_STEP
-    detection_list = []
     scan_info = []
     start_angle = get_servo_angle()
     next_angle = get_servo_angle()
@@ -138,15 +137,9 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         distance = get_status_at(next_angle, servo_speed=servo_speed)
         #print('current angle', next_angle)
         isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})
-        detection_list.append(isDetected)       
-        next_angle = get_servo_angle() + servo_delta
- 
-    if(servo_delta < 0):
-       detection_list.reverse()
-       scan_info.reverse()
-    print('One Sweep detection list:', detection_list) 
-    return (scan_info, detection_list)
+        scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})      
+        next_angle = get_servo_angle() + servo_delta 
+    return (scan_info)
 
 def decide_movement(sweep_info, Isdetected):
     isClearAhead = not sum(Isdetected[3:7])
@@ -163,17 +156,20 @@ def decide_movement(sweep_info, Isdetected):
         else:
             picar_reverse(BACKWARD_SPEED)
 
-def create_advanced_mapping(sweep_info, cam_result):
+def create_mapping(sweep_info, cam_result):
     global envoriment_map
     for entry in sweep_info:
         if(entry['detection']):
             #(x,y) with respect to the car
-            thetaInRadians = math.radians(entry['angle'])
+            thetaInRadians = math.radians(abs(entry['angle']))
             scanned_object_x = entry['distance']*math.sin(thetaInRadians)
             scanned_object_y = entry['distance']*math.cos(thetaInRadians)
             
-            #(x,y) with respect to the ma           
-            map_x = car_start_map_x + scanned_object_x
+            #(x,y) with respect to the ma
+            if entry['angle'] >= 0:
+                map_x = car_start_map_x + scanned_object_x
+            else:
+                map_x = car_start_map_x - scanned_object_x
             map_y = car_start_map_y + scanned_object_y
             
             if((map_x >= MAP_SIZE) or (map_y >= MAP_SIZE)):
@@ -249,14 +245,12 @@ def car_command(command, step=0):
                 picar_reverse(SPEED)
             command = 'Stop'    
         elif(command == 'Left'):
-            turnStartTime = time.time()
-            while((time.time() - turnStartTime) <= TURN_LEFT_TIME_FOR_90_DEGREE):
-                picar_turn_left(SPEED)
+            picar_turn_left(SPEED)
+            time.sleep(TURN_LEFT_TIME_FOR_90_DEGREE)
             command = 'Stop'
         elif(command == 'Right'):
-            turnStartTime = time.time()
-            while((time.time() - turnStartTime) <= TURN_RIGHT_TIME_FOR_90_DEGREE):
-                picar_turn_right(SPEED)
+            picar_turn_right(SPEED)
+            time.sleep(TURN_RIGHT_TIME_FOR_90_DEGREE)
             command = 'Stop'
         else:
             command = 'Stop'
@@ -277,11 +271,13 @@ if __name__ == '__main__':
         
         photointrrupter.setup()
         detector.setup()
-        car_command('Forward', 80)
+        car_command('Left', 80)
+        time.sleep(3)
+        car_command('Right', 80)
         
-        while(True):
-              scan_info, detection_list = perform_one_sweep(40, 0.03)
-              create_advanced_mapping(scan_info, detector.getDetectedObject())
+#         while(True):
+#               scan_info = perform_one_sweep(40, 0.03)
+#               create_mapping(scan_info, detector.getDetectedObject())
 #              print('Main:Object:', detector.getDetectedObject())
 
     finally:
