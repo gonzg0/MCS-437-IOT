@@ -18,27 +18,21 @@ from object_detector import ObjectDetectorOptions
 import Animation as animate
 import threading
 
+np.set_printoptions(edgeitems=30, linewidth=100000, formatter=dict(float=lambda x: "%.3g" % x))
+
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
-ENABLE_PLOT=False
 MAP_SIZE = 200
 FORWARD_SPEED = 5
 REVERSE_SPEED = 10
 TURN_SPEED = 30
 THIRTY_FIVE_CM = 20
 TEN_CM = 10
-SERVO_SLEEP = 0.08
-SERVO_STEP = 18
 DETECTION_DISTANCE = 40
-SERVO_MAX_ANGLE = 90
-SERVO_ZERO_ANGLE = 0
-SERVO_MIN_ANGLE = -90
 SERVO_TIME = 0.02
 TURN_LEFT_TIME_FOR_90_DEGREE = 1.6
 TURN_RIGHT_TIME_FOR_90_DEGREE = 1.6
-servo_currentAngle = SERVO_ZERO_ANGLE
-envoriment_map_ultrasonic = np.zeros((MAP_SIZE,MAP_SIZE), dtype=np.uint8)
-envoriment_map_camera = np.empty((MAP_SIZE,MAP_SIZE), dtype="S10")
+servo_currentAngle = 0
 
 #Considering the car starts from the bottom center
 car_start_map_x = MAP_SIZE/2 -1
@@ -82,20 +76,18 @@ def picar_reverse(speed):
     picar.backward(speed)
 
 def picar_turn_left(speed):
+    photointrrupter.resetDistance()
     photointrrupter.turn = 1
     picar.turn_right(speed)
     
 def picar_turn_right(speed):
+    photointrrupter.resetDistance()
     photointrrupter.turn = 1
     picar.turn_left(speed)    
 
 def picar_stop():
     photointrrupter.turn = 0
     picar.stop()
-    
-def VisualizeData(x, y,cl):
-    if ENABLE_PLOT:
-        animate.animate_scan(x, y, cl=cl)
         
 def set_servo_angle(angle: int):
     global servo_currentAngle
@@ -106,74 +98,65 @@ def get_servo_angle():
     global servo_currentAngle
     return(servo_currentAngle)
 
-def calculate_cycles_from_distance(distance: int):
-    # five centimeters
-    base_distance = {'distance': 5, 'cycles': 2}
-    cycleCount = math.floor(distance / base_distance["distance"])
-    print('cycleCount\n', cycleCount)
-    return cycleCount * base_distance["cycles"]
-
 def get_status_at(angle, servo_speed=SERVO_TIME):
     set_servo_angle(angle)
     time.sleep(servo_speed)
     return ultrasonic.get_distance()
-
-def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
-    global SERVO_STEP
-    scan_info = []
-    start_angle = get_servo_angle()
-    next_angle = get_servo_angle()
-    
-    if(start_angle >= SERVO_MAX_ANGLE):
-        servo_delta = -SERVO_STEP
-    elif(start_angle <= SERVO_MIN_ANGLE):
-        servo_delta = SERVO_STEP
-    else:
-        servo_delta = 0
-
-    while ((start_angle == SERVO_MIN_ANGLE and next_angle <= SERVO_MAX_ANGLE) or
-          (start_angle == SERVO_MAX_ANGLE and next_angle >= SERVO_MIN_ANGLE)):
         
-        distance = get_status_at(next_angle, servo_speed=servo_speed)
-        #print('current angle', next_angle)
-        isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})      
-        next_angle = get_servo_angle() + servo_delta 
-    return (scan_info)
-
-def create_mapping(sweep_info, cam_result):
-    global envoriment_map
-    for entry in sweep_info:
-        if(entry['detection']):
-            #(x,y) with respect to the car
-            thetaInRadians = math.radians(abs(entry['angle']))
-            scanned_object_x = entry['distance']*math.sin(thetaInRadians)
-            scanned_object_y = entry['distance']*math.cos(thetaInRadians)
+class SweepScan():
+    SERVO_SLEEP = 0.08
+    SERVO_STEP = 18
+    DETECTION_DISTANCE = 30
+    SERVO_MAX_ANGLE = 90
+    SERVO_ZERO_ANGLE = 0
+    SERVO_MIN_ANGLE = -90
+    servo_speed = 0.02
+    scan_info = []
+    def __init__(self, detectionDistance, delay_btw_scan_points, DelayBtwnSweeps):
+        self.DETECTION_DISTANCE = detectionDistance
+        self.servo_speed = delay_btw_scan_points
+        self.DelayBtwnSweeps = DelayBtwnSweeps
+        set_servo_angle(self.SERVO_MIN_ANGLE) 
+     
+    def perform_one_sweep(self):
+        #print('perform_one_sweep:')
+        while(True):
+            self.scan_info = []
+            start_angle = get_servo_angle()
+            next_angle = get_servo_angle()
             
-            #(x,y) with respect to the ma
-            if entry['angle'] >= 0:
-                map_x = car_start_map_x + scanned_object_x
+            if(start_angle >= self.SERVO_MAX_ANGLE):
+                servo_delta = -self.SERVO_STEP
+            elif(start_angle <= self.SERVO_MIN_ANGLE):
+                servo_delta = self.SERVO_STEP
             else:
-                map_x = car_start_map_x - scanned_object_x
-            map_y = car_start_map_y + scanned_object_y
+                servo_delta = 0
+
+            while ((start_angle == self.SERVO_MIN_ANGLE and next_angle <= self.SERVO_MAX_ANGLE) or
+                  (start_angle == self.SERVO_MAX_ANGLE and next_angle >= self.SERVO_MIN_ANGLE)):
+                distance = get_status_at(next_angle, servo_speed=self.servo_speed)
+                #print('current angle', next_angle)
+                isDetected = 1 if distance <= self.DETECTION_DISTANCE and not distance == -2 else 0
+                self.scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})      
+                next_angle = get_servo_angle() + servo_delta
+            #print('scan_info:',self.scan_info)
+            time.sleep(self.DelayBtwnSweeps)
             
-            if((map_x >= MAP_SIZE) or (map_y >= MAP_SIZE)):
-                print('x:',scanned_object_x, 'y:',scanned_object_y,'xx:',map_x,'yy:',map_y)
-            elif(not cam_result):
-                envoriment_map_ultrasonic[int(map_x), int(map_y)] = 1
-                VisualizeData(int(map_x), int(map_y), cl='black')
-            else:    
-                envoriment_map_camera[int(map_x), int(map_y)] = cam_result
-                VisualizeData(int(map_x), int(map_y), cl='black')
-                
+    def getScanInfo(self):
+        return(self.scan_info)
+            
+    def setup(self):
+        self.sweepScanThread = threading.Thread(target=self.perform_one_sweep, daemon=True)
+        self.sweepScanThread.start()            
+
 class ObjectDetection():
-    CAMERA_THREAD_SLEEP_TIME = 0.02
-    def __init__(self):
+    def __init__(self, cameraSleepTime):
         self.cam_result = ""
         #Camera setting Camera Id = 0
         self.camera = cv.VideoCapture(0)
         self.camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
         self.camera.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+        self.cameraScanDelay = cameraSleepTime
          
         #Tensorflow model settings
         tensorflow_model_options = ObjectDetectorOptions(
@@ -203,12 +186,12 @@ class ObjectDetection():
                         elif(detected_obect.categories[0].label == 'stop sign'):
                             cam_result = detected_obect.categories[0].label
                     self.cam_result = cam_result
-                    print('camera_scan:Object list:',self.cam_result)
+                    #print('camera_scan:Object list:',self.cam_result)
                 else:
                     print('Camera read error1')                    
             else:
                 print('Camera open error2')
-            time.sleep(self.CAMERA_THREAD_SLEEP_TIME)
+            time.sleep(self.cameraScanDelay)
 
     def setup(self):
         self.cameraThread = threading.Thread(target=self.camera_scan, daemon=True)
@@ -219,19 +202,12 @@ class ObjectDetection():
     
 def car_command(command, step=0):
     photointrrupter.resetDistance()
-    print('car_command:',command,':','step:', step,'Distance:',photointrrupter.getDistance())
-    print('Moving forward:', command)
     while(command != 'stop'):
-        print('Moving forward0:', command)
-        
+        #print('command:', command)
         if(command == 'forward'):
-            print('Moving forward1:', command)
             while(photointrrupter.getDistance() <= step):
                 picar_forward(FORWARD_SPEED)
-                print('Moving forward2:', command)
-                
             command = 'stop'
-            print('Moving forward3:', command)
         elif(command == 'reverse'):
             while(photointrrupter.getDistance() <= step):
                 picar_reverse(REVERSE_SPEED)
@@ -246,7 +222,6 @@ def car_command(command, step=0):
             command = 'stop'
         else:
             command = 'stop'
-    print('Moving forward4:', command)
     picar_stop()
 
 def compile_direction(car, next_point, orientation):
@@ -326,8 +301,9 @@ def create_advanced_mapping_(map, sweep_info, orientation, car_start_map_x, car_
     return map
 
 def runner(sweep_info, map, orientation, car, end):
-    map = create_advanced_mapping_(map, sweep_info, orientation, car[0], car[1])
-    padded_maze = fix_maze(map)
+    maze = create_advanced_mapping_(map, sweep_info, orientation, car[0], car[1])
+    padded_maze = fix_maze(maze)
+    #print(padded_maze)
     path = search(padded_maze, 1, car, end)
     directions = []
     curr_car = car
@@ -337,8 +313,10 @@ def runner(sweep_info, map, orientation, car, end):
         directions.append(direction)
         curr_orientation = update_orientation(curr_orientation, direction)
         curr_car = point
-    return curr_orientation, directions
-        
+    final_orientation, curr_position = follow_directions(directions, orientation, path)
+    #print('curr_position:', curr_position)
+    return final_orientation, curr_position
+
 # maybe add the stuff below to new file later and import instead?
 
 class Node:
@@ -518,7 +496,7 @@ def return_path(current_node,maze):
 # add padding around obstacles
 def fix_maze(maze, boundary_thickness=4): # coordinate system matches cartesian
     obstacles = np.nonzero(maze)
-    print(obstacles)
+    #print(obstacles)
     (y_limit, x_limit) = maze.shape
     y_coords = obstacles[0]
     x_coords = obstacles[1]
@@ -536,48 +514,40 @@ def fix_maze(maze, boundary_thickness=4): # coordinate system matches cartesian
             x_end = x + boundary_thickness
         new_maze[y_start:y_end, x_start:x_end] = 1
     return new_maze
-        
-if __name__ == '__main__':
-    try:
-        set_servo_angle(SERVO_MIN_ANGLE)
-        
-        #Camera setting Camera Id = 0
-        camera = cv.VideoCapture(0)
-        camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
-        camera.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
-         
-        #Tensorflow model settings
-        tensorflow_model_options = ObjectDetectorOptions(
-            num_threads=4,
-            score_threshold=0.5,
-            max_results=3,
-            enable_edgetpu=False)
-         
-        detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)
-        
-        photointrrupter = Photointrrupter(Pin('D6'))
-        photointrrupter.setup()
-        
-        #mark the start on the plot
-        ##VisualizeData(car_start_map_x, car_start_map_y, cl='red')
-        
-        #mark the end on the plot
-        ##VisualizeData(car_destination_map_x, car_destination_map_y, cl='green')
 
-        start = (100,0)
-        end = (100,199)
+def follow_directions(directions, orientation, path, num_steps=30):
+    count = 0
+    curr_orientation = orientation
+    for direction in directions:
+        print('direction:',direction)
+        car_command(direction, 1)
+        count += 1
+        curr_orientation = update_orientation(curr_orientation, direction)
+        if count >= num_steps:
+            break
+    print('path:',path[count-1])
+    return curr_orientation, path[count-1]
+
+if __name__ == '__main__':
+    try:       
+        photointrrupter = Photointrrupter(Pin('D6'))
+        detector = ObjectDetection(cameraSleepTime=0.02)
+        sweepScan = SweepScan(detectionDistance=30, delay_btw_scan_points=0.02, DelayBtwnSweeps=0.02)
+              
+        photointrrupter.setup()
+        detector.setup()
+        sweepScan.setup()
+        
+        start = (50,0)
+        end = (0,100)
         orientation = 0
-        map = np.zeros((200,200), dtype=np.uint8)
-        map = fix_maze(map)
+        map_ = np.zeros((200,200), dtype=np.uint8)
+
         #While ESC key is not pressed
-        while(True):           
-            #get ultrasonic sweep data
-            one_sweep_info = perform_one_sweep(DETECTION_DISTANCE, servo_speed=0.02)           
-            final_orientation, directions = runner(one_sweep_info, map, orientation, start, end)
-            for direction in directions:
-                car_command(direction, 1)
+        while(True):
+            #print('Scan Info:',sweepScan.getScanInfo())
+            orientation, start = runner(sweepScan.getScanInfo(), map_, orientation, start, end)
 
     finally:
-        camera.release()
         picar.stop()
-        set_servo_angle(SERVO_ZERO_ANGLE)
+        set_servo_angle(0)
