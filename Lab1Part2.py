@@ -72,6 +72,7 @@ class Photointrrupter():
         return(self.distance)
     def resetDistance(self):
         self.pulseCount = 0
+        self.distance = 0
         
 def picar_forward(speed):
     photointrrupter.turn = 0
