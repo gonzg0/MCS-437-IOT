@@ -22,9 +22,8 @@ servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
 ENABLE_PLOT=False
 MAP_SIZE = 200
-SPEED = 5
 FORWARD_SPEED = 5
-BACKWARD_SPEED = 10
+REVERSE_SPEED = 10
 TURN_SPEED = 30
 THIRTY_FIVE_CM = 20
 TEN_CM = 10
@@ -66,12 +65,13 @@ class Photointrrupter():
         #if it is a turn skip the distance calcuation
         if(not self.turn):
             self.pulseCount +=1
-            self.distance = self.pulseCount * self.distancePerPulse
+        self.distance = self.pulseCount * self.distancePerPulse
         #print(self.distance)
     def getDistance(self):
         return(self.distance)
     def resetDistance(self):
         self.pulseCount = 0
+        self.distance = 0
         
 def picar_forward(speed):
     photointrrupter.turn = 0
@@ -140,21 +140,6 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})      
         next_angle = get_servo_angle() + servo_delta 
     return (scan_info)
-
-def decide_movement(sweep_info, Isdetected):
-    isClearAhead = not sum(Isdetected[3:7])
-    isClearLeft = not sum(Isdetected[0:2])
-    isClearRight = not sum(Isdetected[8:10])
-
-    if(isClearAhead):
-        picar_forward(FORWARD_SPEED)
-    else:
-        if(isClearLeft):
-            picar_turn_left(TURN_SPEED)
-        elif(isClearRight):
-            picar_turn_right(TURN_SPEED)
-        else:
-            picar_reverse(BACKWARD_SPEED)
 
 def create_mapping(sweep_info, cam_result):
     global envoriment_map
@@ -234,26 +219,34 @@ class ObjectDetection():
     
 def car_command(command, step=0):
     photointrrupter.resetDistance()
-    while((command != 'Stop')):
-        print('car_command:',command,':',photointrrupter.getDistance(),':',step,':',photointrrupter.getDistance() <= step,':',(command == 'forawrd'),':', type(command))
-        if(command == 'Forward'):
+    print('car_command:',command,':','step:', step,'Distance:',photointrrupter.getDistance())
+    print('Moving forward:', command)
+    while(command != 'stop'):
+        print('Moving forward0:', command)
+        
+        if(command == 'forward'):
+            print('Moving forward1:', command)
             while(photointrrupter.getDistance() <= step):
-                picar_forward(SPEED)
-            command = 'Stop'
-        elif(command == 'Reverse'):
+                picar_forward(FORWARD_SPEED)
+                print('Moving forward2:', command)
+                
+            command = 'stop'
+            print('Moving forward3:', command)
+        elif(command == 'reverse'):
             while(photointrrupter.getDistance() <= step):
-                picar_reverse(SPEED)
-            command = 'Stop'    
-        elif(command == 'Left'):
-            picar_turn_left(SPEED)
+                picar_reverse(REVERSE_SPEED)
+            command = 'stop'    
+        elif(command == 'left'):
+            picar_turn_left(TURN_SPEED)
             time.sleep(TURN_LEFT_TIME_FOR_90_DEGREE)
-            command = 'Stop'
-        elif(command == 'Right'):
-            picar_turn_right(SPEED)
+            command = 'stop'
+        elif(command == 'right'):
+            picar_turn_right(TURN_SPEED)
             time.sleep(TURN_RIGHT_TIME_FOR_90_DEGREE)
-            command = 'Stop'
+            command = 'stop'
         else:
-            command = 'Stop'
+            command = 'stop'
+    print('Moving forward4:', command)
     picar_stop()
 
 def compile_direction(car, next_point, orientation):
@@ -570,45 +563,19 @@ if __name__ == '__main__':
         
         #mark the end on the plot
         ##VisualizeData(car_destination_map_x, car_destination_map_y, cl='green')
-        
+
+        start = (100,0)
+        end = (100,199)
+        orientation = 0
+        map = np.zeros((200,200), dtype=np.uint8)
+        map = fix_maze(map)
         #While ESC key is not pressed
-        while (cv.waitKey(1) != 27):           
+        while(True):           
             #get ultrasonic sweep data
-            (one_sweep_info, IsDetected) = perform_one_sweep(DETECTION_DISTANCE, servo_speed=0.02)
-            #get detected camera objects
-            if(camera.isOpened()):
-                success, image = camera.read()
-                if(success):
-                    image = cv.flip(image, 1)
-                    detections_info = detector.detect(image)
-                    cam_result = ""
-                    for detected_obect in detections_info:
-                        if((detected_obect.categories[0].label == 'person') or
-                           (detected_obect.categories[0].label == 'stop sign')):
-                            cam_result=detected_obect.categories[0].label
-                            break
-                    print('Object list:',cam_result)
-                else:
-                    print('Camera read error')                    
-            else:
-                print('Camera open error')
-            
-            start = (100,0)
-            end = (100,200)
-            orientation = 0
-            map = np.zeros((200,200), dtype=np.uint8)
-            map = fix_maze(map)
+            one_sweep_info = perform_one_sweep(DETECTION_DISTANCE, servo_speed=0.02)           
             final_orientation, directions = runner(one_sweep_info, map, orientation, start, end)
-            
             for direction in directions:
-                if direction == 'forward':
-                    car_command('Forward', 1)
-                elif direction == 'left':
-                    car_command('Left', 1)
-                elif direction == 'right':
-                    car_command('Right', 1)
-                else:
-                    car_command('Reverse', 1)
+                car_command(direction, 1)
 
     finally:
         camera.release()
