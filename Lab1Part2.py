@@ -312,6 +312,9 @@ def runner(sweep_info, map, orientation, car, end):
         direction = compile_direction(curr_car, point, curr_orientation)
         directions.append(direction)
         curr_orientation = update_orientation(curr_orientation, direction)
+        if direction == 'right' or direction == 'left':     #if our car is turning then it also needs to move to reach the next point so 2 moves
+            d = compile_direction(curr_car, point, curr_orientation)
+            directions.append(d)
         curr_car = point
     final_orientation, curr_position = follow_directions(directions, orientation, path)
     #print('curr_position:', curr_position)
