@@ -16,11 +16,13 @@ from object_detector import ObjectDetector
 from object_detector import ObjectDetectorOptions
 
 import Animation as animate
-ENABLE_PLOT=False
-MAP_SIZE = 200
+import threading
 
 servo = Servo(PWM("P0"), offset=0)
 ultrasonic = Ultrasonic(Pin('D8'), Pin('D9'))
+ENABLE_PLOT=False
+MAP_SIZE = 200
+SPEED = 5
 FORWARD_SPEED = 5
 BACKWARD_SPEED = 10
 TURN_SPEED = 30
@@ -32,14 +34,12 @@ DETECTION_DISTANCE = 40
 SERVO_MAX_ANGLE = 90
 SERVO_ZERO_ANGLE = 0
 SERVO_MIN_ANGLE = -90
-SERVO_TIME = 0.5
+SERVO_TIME = 0.02
+TURN_LEFT_TIME_FOR_90_DEGREE = 1.6
+TURN_RIGHT_TIME_FOR_90_DEGREE = 1.6
 servo_currentAngle = SERVO_ZERO_ANGLE
 envoriment_map_ultrasonic = np.zeros((MAP_SIZE,MAP_SIZE), dtype=np.uint8)
 envoriment_map_camera = np.empty((MAP_SIZE,MAP_SIZE), dtype="S10")
-CAMERA_OBJECT_NO_OBJECT = 0
-CAMERA_OBJECT_STOP_SIGN = 1
-CAMERA_OBJECT_PERSON = 2
-CAMERA_OBJECT_UNIDENTIFIED = 3
 
 #Considering the car starts from the bottom center
 car_start_map_x = MAP_SIZE/2 -1
@@ -50,7 +50,7 @@ car_destination_map_x = MAP_SIZE/2 -1
 car_destination_map_y = MAP_SIZE -1
 
 class Photointrrupter():
-    wheelDiameter = 2.5
+    wheelDiameter = 6.6
     PPR = 20
     def __init__(self, pin):
         self.pin = pin
@@ -68,7 +68,11 @@ class Photointrrupter():
             self.pulseCount +=1
             self.distance = self.pulseCount * self.distancePerPulse
         #print(self.distance)
-
+    def getDistance(self):
+        return(self.distance)
+    def resetDistance(self):
+        self.pulseCount = 0
+        
 def picar_forward(speed):
     photointrrupter.turn = 0
     picar.forward(speed)
@@ -79,12 +83,16 @@ def picar_reverse(speed):
 
 def picar_turn_left(speed):
     photointrrupter.turn = 1
-    picar.turn_left(speed)
-
+    picar.turn_right(speed)
+    
 def picar_turn_right(speed):
     photointrrupter.turn = 1
-    picar.turn_right(speed)
-        
+    picar.turn_left(speed)    
+
+def picar_stop():
+    photointrrupter.turn = 0
+    picar.stop()
+    
 def VisualizeData(x, y,cl):
     if ENABLE_PLOT:
         animate.animate_scan(x, y, cl=cl)
@@ -112,7 +120,6 @@ def get_status_at(angle, servo_speed=SERVO_TIME):
 
 def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
     global SERVO_STEP
-    detection_list = []
     scan_info = []
     start_angle = get_servo_angle()
     next_angle = get_servo_angle()
@@ -130,12 +137,9 @@ def perform_one_sweep(detection_distance=30, servo_speed=SERVO_TIME):
         distance = get_status_at(next_angle, servo_speed=servo_speed)
         #print('current angle', next_angle)
         isDetected = 1 if distance <= detection_distance and not distance == -2 else 0
-        scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})
-        detection_list.append(isDetected)       
-        next_angle = get_servo_angle() + servo_delta
- 
-    #print('One Sweep detection list:', detection_list) 
-    return (scan_info, detection_list)
+        scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})      
+        next_angle = get_servo_angle() + servo_delta 
+    return (scan_info)
 
 def decide_movement(sweep_info, Isdetected):
     isClearAhead = not sum(Isdetected[3:7])
@@ -145,7 +149,6 @@ def decide_movement(sweep_info, Isdetected):
     if(isClearAhead):
         picar_forward(FORWARD_SPEED)
     else:
-        picar.stop()
         if(isClearLeft):
             picar_turn_left(TURN_SPEED)
         elif(isClearRight):
@@ -153,37 +156,20 @@ def decide_movement(sweep_info, Isdetected):
         else:
             picar_reverse(BACKWARD_SPEED)
 
-def advanced_mapping(sweep_info, cam_result, map_size = 30):
-    map = np.zeros((map_size * 2, map_size), dtype=np.uint8)
+def create_mapping(sweep_info, cam_result):
+    global envoriment_map
     for entry in sweep_info:
         if(entry['detection']):
             #(x,y) with respect to the car
             thetaInRadians = math.radians(abs(entry['angle']))
             scanned_object_x = entry['distance']*math.sin(thetaInRadians)
             scanned_object_y = entry['distance']*math.cos(thetaInRadians)
-
-            #(x,y) with respect to the ma
-            map_x = map_size - scanned_object_x
-            if entry['angle'] >= 0:           
-                map_x = map_size + scanned_object_x
-            map_y = scanned_object_y
-
-            #if(not cam_result):
-            map[int(map_x), int(map_y)] = 1
-
-    return map
-
-def create_advanced_mapping(sweep_info, cam_result):
-    global envoriment_map
-    for entry in sweep_info:
-        if(entry['detection']):
-            #(x,y) with respect to the car
-            thetaInRadians = math.radians(entry['angle'])
-            scanned_object_x = entry['distance']*math.sin(thetaInRadians)
-            scanned_object_y = entry['distance']*math.cos(thetaInRadians)
             
-            #(x,y) with respect to the ma           
-            map_x = car_start_map_x + scanned_object_x
+            #(x,y) with respect to the ma
+            if entry['angle'] >= 0:
+                map_x = car_start_map_x + scanned_object_x
+            else:
+                map_x = car_start_map_x - scanned_object_x
             map_y = car_start_map_y + scanned_object_y
             
             if((map_x >= MAP_SIZE) or (map_y >= MAP_SIZE)):
@@ -194,79 +180,171 @@ def create_advanced_mapping(sweep_info, cam_result):
             else:    
                 envoriment_map_camera[int(map_x), int(map_y)] = cam_result
                 VisualizeData(int(map_x), int(map_y), cl='black')
-
-#   added by me below
-
-def find_quadrant(car_x, car_y, end_x, end_y):
-    dx = end_x - car_x
-    dy = end_y - car_y
-    x_ , y_ = -1 , -1
-    if dx >= 0: x_ = 1
-    if dy >= 0: y_ = 1
-
-    if x_ == 1 and y_ == 1:
-        return 1
-    elif x_ == -1 and y_ == 1:
-        return 2
-    elif x_ == -1 and y_ == -1:
-        return 3
-    return 4
-
-def get_intersect(a1, a2, b1, b2, quadrant):
-    """ 
-    Returns the point of intersection of the lines passing through a2,a1 and b2,b1.
-    a1: [x, y] a point on the first line
-    a2: [x, y] another point on the first line
-    b1: [x, y] a point on the second line
-    b2: [x, y] another point on the second line
-    """
-    s = np.vstack([a1,a2,b1,b2])        # s for stacked
-    h = np.hstack((s, np.ones((4, 1)))) # h for homogeneous
-    l1 = np.cross(h[0], h[1])           # get first line
-    l2 = np.cross(h[2], h[3])           # get second line
-    x, y, z = np.cross(l1, l2)          # point of intersection
-    if z == 0:                          # lines are parallel
-        return (float('inf'), float('inf'))
-    if quadrant == 1:
-        return (x//z - 1, y//z - 1)
-    return (x//z + 1, y//z - 1)
-
-def intersection_points(quadrant, car_x, car_y, end_x, end_y, map_size):
-
-    if quadrant == 3 or quadrant == 4 :
-        raise Exception('turn around??')
-
-    a1 = [car_x, car_y]
-    a2 = [end_x, end_y]
-    if quadrant == 1:
-        b1 = [car_x+map_size, car_y]
-        b2 = [car_x+map_size, car_y+map_size]
-        x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
-        if x_intr == float('inf') or x_intr > car_x+map_size or y_intr > car_y+map_size:
-            b1 = [car_x, car_y+map_size]
-            x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
-            if x_intr == float('inf'):
-                raise Exception('something is wrong in quadrant?')
-            return x_intr, y_intr
-    elif quadrant == 2:
-        b1 = [car_x-map_size, car_y]
-        b2 = [car_x-map_size, car_y+map_size]
-        x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
-        if x_intr == float('inf') or x_intr < car_x-map_size or y_intr > car_y+map_size:
-            b1 = [car_x, car_y+map_size]
-            x_intr, y_intr = get_intersect(a1,a2,b1,b2, quadrant)
-            if x_intr == float('inf'):
-                raise Exception('something is wrong in quadrant?')
-            return x_intr, y_intr
+                
+class ObjectDetection():
+    CAMERA_THREAD_SLEEP_TIME = 0.02
+    def __init__(self):
+        self.cam_result = ""
+        #Camera setting Camera Id = 0
+        self.camera = cv.VideoCapture(0)
+        self.camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
+        self.camera.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
+         
+        #Tensorflow model settings
+        tensorflow_model_options = ObjectDetectorOptions(
+            num_threads=4,
+            score_threshold=0.5,
+            max_results=3,
+            enable_edgetpu=False)
+         
+        self.detector = ObjectDetector(model_path='efficientdet_lite0.tflite', options=tensorflow_model_options)        
+    def __del__(self):
+        self.camera.release()
         
+    def camera_scan(self):
+        global cam_result
+        while(True):
+            #get detected camera objects
+            if(self.camera.isOpened()):
+                success, image = self.camera.read()
+                if(success):
+                    image = cv.flip(image, 1)
+                    detections_info = self.detector.detect(image)
+                    cam_result = ""
+                    for detected_obect in detections_info:
+                        if(detected_obect.categories[0].label == 'person'):
+                            cam_result = detected_obect.categories[0].label
+                            break
+                        elif(detected_obect.categories[0].label == 'stop sign'):
+                            cam_result = detected_obect.categories[0].label
+                    self.cam_result = cam_result
+                    print('camera_scan:Object list:',self.cam_result)
+                else:
+                    print('Camera read error1')                    
+            else:
+                print('Camera open error2')
+            time.sleep(self.CAMERA_THREAD_SLEEP_TIME)
 
-def find_pseduo_end(car_x, car_y, end_x, end_y, map_size):
+    def setup(self):
+        self.cameraThread = threading.Thread(target=self.camera_scan, daemon=True)
+        self.cameraThread.start()
+        
+    def getDetectedObject(self):
+        return(self.cam_result)
+    
+def car_command(command, step=0):
+    photointrrupter.resetDistance()
+    while((command != 'Stop')):
+        print('car_command:',command,':',photointrrupter.getDistance(),':',step,':',photointrrupter.getDistance() <= step,':',(command == 'forawrd'),':', type(command))
+        if(command == 'Forward'):
+            while(photointrrupter.getDistance() <= step):
+                picar_forward(SPEED)
+            command = 'Stop'
+        elif(command == 'Reverse'):
+            while(photointrrupter.getDistance() <= step):
+                picar_reverse(SPEED)
+            command = 'Stop'    
+        elif(command == 'Left'):
+            picar_turn_left(SPEED)
+            time.sleep(TURN_LEFT_TIME_FOR_90_DEGREE)
+            command = 'Stop'
+        elif(command == 'Right'):
+            picar_turn_right(SPEED)
+            time.sleep(TURN_RIGHT_TIME_FOR_90_DEGREE)
+            command = 'Stop'
+        else:
+            command = 'Stop'
+    picar_stop()
 
-    quadrant = find_quadrant(car_x, car_y, end_x, end_y)
-    x_intr, y_intr = intersection_points(quadrant, car_x, car_y, end_x, end_y, map_size)
-    #print(x_intr, y_intr)
-    return x_intr, y_intr
+def compile_direction(car, next_point, orientation):
+    next_point_x, next_point_y = next_point[0], next_point[1]
+    car_x, car_y = car[0], car[1]
+    dx = next_point_x - car_x
+    dy = next_point_y - car_y
+    if dx > 0:
+        if orientation == 0:
+            return 'right'
+        elif orientation == 90:
+            return 'forward'
+        elif orientation == 180:
+            return 'left'
+        elif orientation == 270:
+            return 'back'       #turn 180?
+    elif dx < 0:
+        if orientation == 0:
+            return 'left'
+        elif orientation == 90:
+            return 'back'
+        elif orientation == 180:
+            return 'right'
+        elif orientation == 270:
+            return 'forward'
+    elif dy > 0:
+        if orientation == 0:
+            return 'forward'
+        elif orientation == 90:
+            return 'left'
+        elif orientation == 180:
+            return 'back'
+        elif orientation == 270:
+            return 'right'
+    elif dy < 0:
+        if orientation == 0:
+            return 'back'
+        elif orientation == 90:
+            return 'right'
+        elif orientation == 180:
+            return 'forward'
+        elif orientation == 270:
+            return 'left'
 
+def update_orientation(curr, turn):
+    degree = 0
+    if turn == 'right':
+        degree = 90
+    elif turn == 'left':
+        degree = -90
+    curr = (curr + degree) % 360
+    return curr 
+
+
+def create_advanced_mapping_(map, sweep_info, orientation, car_start_map_x, car_start_map_y):
+    for entry in sweep_info:
+        if(entry['detection']):
+            #(x,y) with respect to the car
+            thetaInRadians = math.radians(entry['angle'])
+            scanned_object_x = entry['distance']*math.sin(thetaInRadians)
+            scanned_object_y = entry['distance']*math.cos(thetaInRadians)
+              
+            if orientation == 0:
+                map_x = car_start_map_x + scanned_object_x
+                map_y = car_start_map_y + scanned_object_y
+            elif orientation == 90:
+                map_x = car_start_map_x + scanned_object_y
+                map_y = car_start_map_y - scanned_object_x
+            elif orientation == 180:
+                map_x = car_start_map_x - scanned_object_x
+                map_y = car_start_map_y - scanned_object_y
+            elif orientation == 270:
+                map_x = car_start_map_x - scanned_object_y
+                map_y = car_start_map_y + scanned_object_x
+
+            map[int(map_x), int(map_y)] = 1
+    return map
+
+def runner(sweep_info, map, orientation, car, end):
+    map = create_advanced_mapping_(map, sweep_info, orientation, car[0], car[1])
+    padded_maze = fix_maze(map)
+    path = search(padded_maze, 1, car, end)
+    directions = []
+    curr_car = car
+    curr_orientation = orientation
+    for point in path:
+        direction = compile_direction(curr_car, point, curr_orientation)
+        directions.append(direction)
+        curr_orientation = update_orientation(curr_orientation, direction)
+        curr_car = point
+    return curr_orientation, directions
         
 # maybe add the stuff below to new file later and import instead?
 
@@ -430,8 +508,22 @@ def search(maze, cost, start, end):
             # Add the child to the yet_to_visit list
             yet_to_visit_list.append(child)
 
+#This function return the path of the search
+def return_path(current_node,maze):
+    path = []
+    no_rows, no_columns = np.shape(maze)
+    # here we create the initialized result maze with -1 in every position
+    result = [[-1 for i in range(no_columns)] for j in range(no_rows)]
+    current = current_node
+    while current is not None:
+        path.append(current.position)
+        current = current.parent
+    # Return reversed path as we need to show from start to end path
+    path = path[::-1]
+    return path
+
 # add padding around obstacles
-def fix_maze(maze, boundary_thickness=5): # coordinate system matches cartesian
+def fix_maze(maze, boundary_thickness=4): # coordinate system matches cartesian
     obstacles = np.nonzero(maze)
     print(obstacles)
     (y_limit, x_limit) = maze.shape
@@ -500,10 +592,23 @@ if __name__ == '__main__':
                     print('Camera read error')                    
             else:
                 print('Camera open error')
-            create_advanced_mapping(one_sweep_info, cam_result)
             
-            decide_movement(one_sweep_info, IsDetected)
-        #print(envoriment_map)
+            start = (100,0)
+            end = (100,200)
+            orientation = 0
+            map = np.zeros((200,200), dtype=np.uint8)
+            map = fix_maze(map)
+            final_orientation, directions = runner(one_sweep_info, map, orientation, start, end)
+            
+            for direction in directions:
+                if direction == 'forward':
+                    car_command('Forward', 1)
+                elif direction == 'left':
+                    car_command('Left', 1)
+                elif direction == 'right':
+                    car_command('Right', 1)
+                else:
+                    car_command('Reverse', 1)
 
     finally:
         camera.release()
