@@ -524,10 +524,11 @@ def follow_directions(directions, orientation, path, num_steps=30):
     for direction in directions:
         print('direction:',direction)
         car_command(direction, 1)
-        count += 1
+        if direction == 'forward':
+            count += 1
         curr_orientation = update_orientation(curr_orientation, direction)
-        if count >= num_steps:
-            break
+        #if count >= num_steps:
+            #break
     print('path:',path[count-1])
     return curr_orientation, path[count-1]
 
