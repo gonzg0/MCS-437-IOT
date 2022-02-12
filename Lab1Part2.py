@@ -138,6 +138,10 @@ class SweepScan():
         self.sweepScanThread.start()            
 
 class ObjectDetection():
+    STOP_NOT_DETECTED = 0
+    STOP_DETECTED = 1
+    READY_FOR_NEW_STOP = 2
+
     def __init__(self, cameraSleepTime):
         self.cam_result = ""
         #Camera setting Camera Id = 0
@@ -145,6 +149,7 @@ class ObjectDetection():
         self.camera.set(cv.CAP_PROP_FRAME_WIDTH, 640)
         self.camera.set(cv.CAP_PROP_FRAME_HEIGHT, 480)
         self.cameraScanDelay = cameraSleepTime
+        self.stopDetectionState = self.STOP_NOT_DETECTED
          
         #Tensorflow model settings
         tensorflow_model_options = ObjectDetectorOptions(
@@ -158,7 +163,6 @@ class ObjectDetection():
         self.camera.release()
         
     def camera_scan(self):
-        global cam_result
         while(True):
             #get detected camera objects
             if(self.camera.isOpened()):
@@ -167,14 +171,21 @@ class ObjectDetection():
                     image = cv.flip(image, 1)
                     detections_info = self.detector.detect(image)
                     cam_result = ""
+                    stop_state = self.stopDetectionState
+                    
                     for detected_obect in detections_info:
                         if(detected_obect.categories[0].label == 'person'):
                             cam_result = detected_obect.categories[0].label
                             break
-                        elif(detected_obect.categories[0].label == 'stop sign'):
-                            cam_result = detected_obect.categories[0].label
-                    self.cam_result = cam_result
-                    #print('camera_scan:Object list:',self.cam_result)
+                        
+                    if(cam_result == ""): 
+                        for detected_obect in detections_info:                        
+                            if(detected_obect.categories[0].label == 'stop sign'):
+                                cam_result = detected_obect.categories[0].label
+                                break
+                            
+                    self.cam_result = self.runStopStateMachine(cam_result)
+                    print('camera_scan:Object list:',self.cam_result)
                 else:
                     print('Camera read error1')                    
             else:
@@ -185,16 +196,43 @@ class ObjectDetection():
         self.cameraThread = threading.Thread(target=self.camera_scan, daemon=True)
         self.cameraThread.start()
         
+    def runStopStateMachine(self, cam_result):                                        
+        if(cam_result == 'stop sign'):                        
+            if(self.stopDetectionState == self.READY_FOR_NEW_STOP):
+                cam_result = ""
+            else:
+                if(self.stopDetectionState == self.STOP_NOT_DETECTED):
+                    self.stopDetectionState = self.STOP_DETECTED
+                    cam_result = 'stop sign'
+                else:
+                    self.stopDetectionState = self.STOP_DETECTED
+                    cam_result = 'stop sign'
+        else:
+            self.stopDetectionState = self.STOP_NOT_DETECTED
+        return cam_result
+        
     def getDetectedObject(self):
         return(self.cam_result)
     
+    def StopDone(self):
+        self.stopDetectionState = self.READY_FOR_NEW_STOP
+    
 def car_command(command, step=0):
     photointrrupter.resetDistance()
+    detector.getDetectedObject
+    stopDone = False
+    
     while(command != 'stop'):
-        #print('command:', command)
         if(command == 'forward'):
             while(photointrrupter.getDistance() <= step):
-                picar_forward(FORWARD_SPEED)
+                if(detector.getDetectedObject() == 'person'):
+                    picar_stop()
+                elif((detector.getDetectedObject() == 'stop sign')):
+                    picar_stop()
+                    time.sleep(2)
+                    detector.StopDone()
+                else:
+                    picar_forward(FORWARD_SPEED)
             command = 'stop'
         elif(command == 'reverse'):
             while(photointrrupter.getDistance() <= step):
@@ -526,19 +564,20 @@ if __name__ == '__main__':
         detector = ObjectDetection(cameraSleepTime=0.02)
         sweepScan = SweepScan(detectionDistance=30, delay_btw_scan_points=0.02, DelayBtwnSweeps=0.02)
               
-        photointrrupter.setup()
+#        photointrrupter.setup()
         detector.setup()
-        sweepScan.setup()
-        
-        start = (200,0)
-        end = (100,200)
-        orientation = 0
-        map_ = np.zeros((300,300), dtype=np.uint8)
-
-        #While ESC key is not pressed
-        while(True):
-            #print('Scan Info:',sweepScan.getScanInfo())
-            orientation, start = runner(sweepScan.getScanInfo(), map_, orientation, start, end)
+#         sweepScan.setup()
+#         
+#         start = (200,0)
+#         end = (100,200)
+#         orientation = 0
+#         map_ = np.zeros((300,300), dtype=np.uint8)
+#         
+        car_command('forward', 200)
+#         #While ESC key is not pressed
+#          while(True):
+# #             #print('Scan Info:',sweepScan.getScanInfo())
+#              orientation, start = runner(sweepScan.getScanInfo(), map_, orientation, start, end)
 
     finally:
         picar.stop()
