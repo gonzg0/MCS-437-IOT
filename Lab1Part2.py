@@ -26,10 +26,6 @@ MAP_SIZE = 200
 FORWARD_SPEED = 5
 REVERSE_SPEED = 10
 TURN_SPEED = 30
-THIRTY_FIVE_CM = 20
-TEN_CM = 10
-DETECTION_DISTANCE = 40
-SERVO_TIME = 0.02
 TURN_LEFT_TIME_FOR_90_DEGREE = 1.6
 TURN_RIGHT_TIME_FOR_90_DEGREE = 1.6
 servo_currentAngle = 0
@@ -42,31 +38,6 @@ car_start_map_y = 0
 car_destination_map_x = MAP_SIZE/2 -1
 car_destination_map_y = MAP_SIZE -1
 
-class Photointrrupter():
-    wheelDiameter = 6.6
-    PPR = 20
-    def __init__(self, pin):
-        self.pin = pin
-        self.distancePerPulse = (2*3.14*self.wheelDiameter/2)/self.PPR
-        self.distance = 0
-        self.pulseCount = 0
-        self.turn = 0
-        
-    def setup(self):
-        self.pin.irq(self.RisingEdgeHandler, GPIO.RISING)
-    
-    def RisingEdgeHandler(self, channel):
-        #if it is a turn skip the distance calcuation
-        if(not self.turn):
-            self.pulseCount +=1
-        self.distance = self.pulseCount * self.distancePerPulse
-        #print(self.distance)
-    def getDistance(self):
-        return(self.distance)
-    def resetDistance(self):
-        self.pulseCount = 0
-        self.distance = 0
-        
 def picar_forward(speed):
     photointrrupter.turn = 0
     picar.forward(speed)
@@ -88,21 +59,33 @@ def picar_turn_right(speed):
 def picar_stop():
     photointrrupter.turn = 0
     picar.stop()
+    
+class Photointrrupter():
+    wheelDiameter = 6.6
+    PPR = 20
+    
+    def __init__(self, pin):
+        self.pin = pin
+        self.distancePerPulse = (2*3.14*self.wheelDiameter/2)/self.PPR
+        self.distance = 0
+        self.pulseCount = 0
+        self.turn = 0
         
-def set_servo_angle(angle: int):
-    global servo_currentAngle
-    servo_currentAngle = angle
-    servo.set_angle(angle)
+    def setup(self):
+        self.pin.irq(self.RisingEdgeHandler, GPIO.RISING)
+    
+    def RisingEdgeHandler(self, channel):
+        if(not self.turn):
+            self.pulseCount +=1
+        self.distance = self.pulseCount * self.distancePerPulse
 
-def get_servo_angle():
-    global servo_currentAngle
-    return(servo_currentAngle)
-
-def get_status_at(angle, servo_speed=SERVO_TIME):
-    set_servo_angle(angle)
-    time.sleep(servo_speed)
-    return ultrasonic.get_distance()
-        
+    def getDistance(self):
+        return(self.distance)
+    
+    def resetDistance(self):
+        self.pulseCount = 0
+        self.distance = 0
+               
 class SweepScan():
     SERVO_SLEEP = 0.08
     SERVO_STEP = 18
@@ -112,18 +95,21 @@ class SweepScan():
     SERVO_MIN_ANGLE = -90
     servo_speed = 0.02
     scan_info = []
+    
     def __init__(self, detectionDistance, delay_btw_scan_points, DelayBtwnSweeps):
         self.DETECTION_DISTANCE = detectionDistance
         self.servo_speed = delay_btw_scan_points
         self.DelayBtwnSweeps = DelayBtwnSweeps
-        set_servo_angle(self.SERVO_MIN_ANGLE) 
-     
+        self.servo_currentAngle = self.SERVO_MIN_ANGLE 
+        servo.set_angle(self.servo_currentAngle)
+        
+    def __del__(self):
+        servo.set_angle(SERVO_ZERO_ANGLE)
+        
     def perform_one_sweep(self):
-        #print('perform_one_sweep:')
         while(True):
             self.scan_info = []
-            start_angle = get_servo_angle()
-            next_angle = get_servo_angle()
+            start_angle = self.servo_currentAngle
             
             if(start_angle >= self.SERVO_MAX_ANGLE):
                 servo_delta = -self.SERVO_STEP
@@ -131,15 +117,18 @@ class SweepScan():
                 servo_delta = self.SERVO_STEP
             else:
                 servo_delta = 0
-
-            while ((start_angle == self.SERVO_MIN_ANGLE and next_angle <= self.SERVO_MAX_ANGLE) or
-                  (start_angle == self.SERVO_MAX_ANGLE and next_angle >= self.SERVO_MIN_ANGLE)):
-                distance = get_status_at(next_angle, servo_speed=self.servo_speed)
-                #print('current angle', next_angle)
-                isDetected = 1 if distance <= self.DETECTION_DISTANCE and not distance == -2 else 0
-                self.scan_info.append({'distance': distance, 'angle': next_angle, 'detection': isDetected})      
-                next_angle = get_servo_angle() + servo_delta
-            #print('scan_info:',self.scan_info)
+            while ((start_angle <= self.SERVO_MIN_ANGLE and self.servo_currentAngle < self.SERVO_MAX_ANGLE) or
+                  (start_angle >= self.SERVO_MAX_ANGLE and self.servo_currentAngle > self.SERVO_MIN_ANGLE)):
+                print('servo set:', self.servo_currentAngle)
+                servo.set_angle(self.servo_currentAngle)
+                time.sleep(self.servo_speed)
+                distance = ultrasonic.get_distance()
+                if((distance <= self.DETECTION_DISTANCE) and (not (distance == -2))):
+                    isDetected = 1
+                else:
+                    isDetected = 0
+                self.scan_info.append({'distance': distance, 'angle': self.servo_currentAngle, 'detection': isDetected})      
+                self.servo_currentAngle = self.servo_currentAngle + servo_delta 
             time.sleep(self.DelayBtwnSweeps)
             
     def getScanInfo(self):
@@ -297,7 +286,7 @@ def create_advanced_mapping_(map, sweep_info, orientation, car_start_map_x, car_
                 map_x = car_start_map_x - scanned_object_y
                 map_y = car_start_map_y + scanned_object_x
 
-            map[int(map_x), int(map_y)] = 1
+            map[int(map_x), int(map_y)] = 0
     return map
 
 def runner(sweep_info, map, orientation, car, end):
@@ -542,10 +531,10 @@ if __name__ == '__main__':
         detector.setup()
         sweepScan.setup()
         
-        start = (50,0)
-        end = (0,100)
+        start = (200,0)
+        end = (100,200)
         orientation = 0
-        map_ = np.zeros((200,200), dtype=np.uint8)
+        map_ = np.zeros((300,300), dtype=np.uint8)
 
         #While ESC key is not pressed
         while(True):
@@ -554,4 +543,3 @@ if __name__ == '__main__':
 
     finally:
         picar.stop()
-        set_servo_angle(0)
