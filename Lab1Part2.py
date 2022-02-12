@@ -154,7 +154,7 @@ class ObjectDetection():
         #Tensorflow model settings
         tensorflow_model_options = ObjectDetectorOptions(
             num_threads=4,
-            score_threshold=0.5,
+            score_threshold=0.3,
             max_results=3,
             enable_edgetpu=False)
          
@@ -227,7 +227,7 @@ def car_command(command, step=0):
             while(photointrrupter.getDistance() <= step):
                 if(detector.getDetectedObject() == 'person'):
                     picar_stop()
-                elif((detector.getDetectedObject() == 'stop sign')):
+                elif(detector.getDetectedObject() == 'stop sign'):
                     picar_stop()
                     time.sleep(2)
                     detector.StopDone()
@@ -322,8 +322,9 @@ def create_advanced_mapping_(map, sweep_info, orientation, car_start_map_x, car_
             elif orientation == 270:
                 map_x = car_start_map_x - scanned_object_y
                 map_y = car_start_map_y + scanned_object_x
-
-            map[int(map_x), int(map_y)] = 0
+            
+            if((detector.getDetectedObject() != 'stop sign') and (detector.getDetectedObject() != 'person')):
+                map[int(map_x), int(map_y)] = 1
     return map
 
 def runner(sweep_info, map, orientation, car, end):
@@ -564,20 +565,19 @@ if __name__ == '__main__':
         detector = ObjectDetection(cameraSleepTime=0.02)
         sweepScan = SweepScan(detectionDistance=30, delay_btw_scan_points=0.02, DelayBtwnSweeps=0.02)
               
-#        photointrrupter.setup()
+        photointrrupter.setup()
         detector.setup()
-#         sweepScan.setup()
-#         
-#         start = (200,0)
-#         end = (100,200)
-#         orientation = 0
-#         map_ = np.zeros((300,300), dtype=np.uint8)
-#         
-        car_command('forward', 200)
-#         #While ESC key is not pressed
-#          while(True):
-# #             #print('Scan Info:',sweepScan.getScanInfo())
-#              orientation, start = runner(sweepScan.getScanInfo(), map_, orientation, start, end)
+        sweepScan.setup()
+        
+        start = (200,0)
+        end = (100,200)
+        orientation = 0
+        map_ = np.zeros((300,300), dtype=np.uint8)
+        
+        #While ESC key is not pressed
+        while(True):
+#             #print('Scan Info:',sweepScan.getScanInfo())
+             orientation, start = runner(sweepScan.getScanInfo(), map_, orientation, start, end)
 
     finally:
         picar.stop()
