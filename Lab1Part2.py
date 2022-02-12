@@ -119,7 +119,6 @@ class SweepScan():
                 servo_delta = 0
             while ((start_angle <= self.SERVO_MIN_ANGLE and self.servo_currentAngle < self.SERVO_MAX_ANGLE) or
                   (start_angle >= self.SERVO_MAX_ANGLE and self.servo_currentAngle > self.SERVO_MIN_ANGLE)):
-                print('servo set:', self.servo_currentAngle)
                 servo.set_angle(self.servo_currentAngle)
                 time.sleep(self.servo_speed)
                 distance = ultrasonic.get_distance()
